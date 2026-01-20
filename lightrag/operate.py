@@ -2635,6 +2635,9 @@ async def consolidate_graph_entities(
     if not global_config.get("enable_entity_resolution", True):
         return {}
 
+    import time as perf_time
+    consolidate_start = perf_time.perf_counter()
+
     similarity_threshold = global_config.get("entity_similarity_threshold", DEFAULT_ENTITY_SIMILARITY_THRESHOLD)
     min_name_length = global_config.get("entity_min_name_length", DEFAULT_ENTITY_MIN_NAME_LENGTH)
     prefer_shorter = global_config.get("prefer_shorter_canonical_name", False)
@@ -2646,12 +2649,17 @@ async def consolidate_graph_entities(
         logger.warning(f"Failed to get nodes for graph consolidation: {e}")
         return {}
 
+    fetch_time = perf_time.perf_counter()
+    workspace = global_config.get("workspace", "unknown")
+    logger.info(f"[PERF] Post-consolidation fetch: {(fetch_time - consolidate_start)*1000:.1f}ms ({len(existing_nodes) if existing_nodes else 0} nodes, workspace={workspace})")
+
     if not existing_nodes or len(existing_nodes) < 2:
         return {}
 
     logger.info(f"Post-processing consolidation: analyzing {len(existing_nodes)} entities")
 
     # 2. Group entities by type
+    group_start = perf_time.perf_counter()
     entities_by_type: dict[str, list[tuple[str, str]]] = defaultdict(list)
     for node in existing_nodes:
         entity_name = node.get("entity_id") or node.get("id")
@@ -2660,7 +2668,12 @@ async def consolidate_graph_entities(
             normalized = _normalize_for_matching(entity_name)
             entities_by_type[entity_type].append((entity_name, normalized))
 
+    group_time = perf_time.perf_counter()
+    total_matchable = sum(len(v) for v in entities_by_type.values())
+    logger.info(f"[PERF] Post-consolidation grouping: {(group_time - group_start)*1000:.1f}ms ({total_matchable} matchable entities in {len(entities_by_type)} types)")
+
     # 3. Find clusters of similar entities within each type
+    fuzzy_start = perf_time.perf_counter()
     consolidation_map: dict[str, str] = {}  # old_name -> canonical_name
 
     # CPU yielding configuration: yield every N comparisons
@@ -2726,7 +2739,16 @@ async def consolidate_graph_entities(
                     f"Graph consolidation: {aliases} → '{canonical}' (type: {entity_type})"
                 )
 
+    fuzzy_time = perf_time.perf_counter()
+    fuzzy_duration = fuzzy_time - fuzzy_start
+    comparisons_per_sec = total_comparison_count / fuzzy_duration if fuzzy_duration > 0 else 0
+    logger.info(
+        f"[PERF] Post-consolidation fuzzy matching: {fuzzy_duration*1000:.1f}ms "
+        f"({total_comparison_count:,} comparisons, {comparisons_per_sec:,.0f}/sec)"
+    )
+
     # 5. Apply consolidation to the graph
+    apply_start = perf_time.perf_counter()
     if consolidation_map:
         logger.info(
             f"Post-processing consolidation: merging {len(consolidation_map)} duplicate entities"
@@ -2840,10 +2862,16 @@ async def consolidate_graph_entities(
             except Exception as e:
                 logger.warning(f"Failed to consolidate '{old_name}' → '{canonical_name}': {e}")
 
+        apply_time = perf_time.perf_counter()
+        logger.info(f"[PERF] Post-consolidation apply: {(apply_time - apply_start)*1000:.1f}ms ({len(consolidation_map)} merges)")
+
         logger.info(
             f"Post-processing consolidation complete: "
             f"{len(existing_nodes)} → {len(existing_nodes) - len(consolidation_map)} entities"
         )
+
+    total_consolidate_time = perf_time.perf_counter() - consolidate_start
+    logger.info(f"[PERF] Post-consolidation TOTAL: {total_consolidate_time*1000:.1f}ms")
 
     return consolidation_map
 
@@ -2898,6 +2926,10 @@ async def merge_nodes_and_edges(
             if pipeline_status.get("cancellation_requested", False):
                 raise PipelineCancelledException("User cancelled during merge phase")
 
+    # Performance timing for bottleneck identification
+    import time as perf_time
+    merge_start_time = perf_time.perf_counter()
+
     # Collect all nodes and edges from all chunks
     all_nodes = defaultdict(list)
     all_edges = defaultdict(list)
@@ -2912,8 +2944,12 @@ async def merge_nodes_and_edges(
             sorted_edge_key = tuple(sorted(edge_key))
             all_edges[sorted_edge_key].extend(edges)
 
+    collect_time = perf_time.perf_counter()
+    logger.info(f"[PERF] Collect nodes/edges: {(collect_time - merge_start_time)*1000:.1f}ms ({len(all_nodes)} nodes, {len(all_edges)} edges)")
+
     # ===== Entity Resolution: Consolidate similar entity names =====
     if global_config.get("enable_entity_resolution", True):
+        entity_res_start = perf_time.perf_counter()
         original_count = len(all_nodes)
         resolver = EntityResolver(
             similarity_threshold=global_config.get("entity_similarity_threshold", DEFAULT_ENTITY_SIMILARITY_THRESHOLD),
@@ -2929,14 +2965,15 @@ async def merge_nodes_and_edges(
         all_nodes = consolidated_nodes
 
         resolved_count = len(all_nodes)
-        if original_count != resolved_count:
-            logger.info(
-                f"Entity resolution: {original_count} → {resolved_count} entities "
-                f"(merged {original_count - resolved_count})"
-            )
+        entity_res_time = perf_time.perf_counter()
+        logger.info(
+            f"[PERF] Entity resolution: {(entity_res_time - entity_res_start)*1000:.1f}ms "
+            f"({original_count} → {resolved_count} entities, merged {original_count - resolved_count})"
+        )
 
     # ===== Cross-Document Entity Resolution: Match against existing graph entities =====
     if global_config.get("enable_entity_resolution", True):
+        cross_doc_start = perf_time.perf_counter()
         pre_cross_doc_count = len(all_nodes)
         all_nodes, cross_doc_resolutions = await _resolve_cross_document_entities(
             all_nodes, knowledge_graph_inst, global_config
@@ -2946,6 +2983,8 @@ async def merge_nodes_and_edges(
         for entity_name, entities in all_nodes.items():
             cross_doc_nodes[entity_name] = entities
         all_nodes = cross_doc_nodes
+        cross_doc_time = perf_time.perf_counter()
+        logger.info(f"[PERF] Cross-doc resolution: {(cross_doc_time - cross_doc_start)*1000:.1f}ms ({len(cross_doc_resolutions)} resolved)")
 
         # Log cross-document resolutions
         if cross_doc_resolutions:
@@ -2973,6 +3012,7 @@ async def merge_nodes_and_edges(
     semaphore = asyncio.Semaphore(graph_max_async)
 
     # ===== Phase 1: Process all entities concurrently =====
+    phase1_start = perf_time.perf_counter()
     log_message = f"Phase 1: Processing {total_entities_count} entities from {doc_id} (async: {graph_max_async})"
     logger.info(log_message)
     async with pipeline_status_lock:
@@ -3073,7 +3113,11 @@ async def merge_nodes_and_edges(
         if first_exception is not None:
             raise first_exception
 
+    phase1_time = perf_time.perf_counter()
+    logger.info(f"[PERF] Phase 1 (entities): {(phase1_time - phase1_start)*1000:.1f}ms ({total_entities_count} entities)")
+
     # ===== Phase 2: Process all relationships concurrently =====
+    phase2_start = perf_time.perf_counter()
     log_message = f"Phase 2: Processing {total_relations_count} relations from {doc_id} (async: {graph_max_async})"
     logger.info(log_message)
     async with pipeline_status_lock:
@@ -3193,7 +3237,11 @@ async def merge_nodes_and_edges(
         if first_exception is not None:
             raise first_exception
 
+    phase2_time = perf_time.perf_counter()
+    logger.info(f"[PERF] Phase 2 (relations): {(phase2_time - phase2_start)*1000:.1f}ms ({total_relations_count} relations)")
+
     # ===== Phase 3: Update full_entities and full_relations storage =====
+    phase3_start = perf_time.perf_counter()
     if full_entities_storage and full_relations_storage and doc_id:
         try:
             # Merge all entities: original entities + entities added during edge processing
@@ -3257,6 +3305,11 @@ async def merge_nodes_and_edges(
                 f"Failed to update entity-relation index for document {doc_id}: {e}"
             )
             # Don't raise exception to avoid affecting main flow
+
+    phase3_time = perf_time.perf_counter()
+    total_merge_time = phase3_time - merge_start_time
+    logger.info(f"[PERF] Phase 3 (storage): {(phase3_time - phase3_start)*1000:.1f}ms")
+    logger.info(f"[PERF] Total merge_nodes_and_edges: {total_merge_time*1000:.1f}ms")
 
     log_message = f"Completed merging: {len(processed_entities)} entities, {len(all_added_entities)} extra entities, {len(processed_edges)} relations"
     logger.info(log_message)
