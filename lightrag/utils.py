@@ -642,9 +642,14 @@ def priority_limit_async_func_call(
                                 task_id,
                                 args,
                                 kwargs,
+                                captured_token_tracker,
                             ) = await asyncio.wait_for(queue.get(), timeout=1.0)
                         except asyncio.TimeoutError:
                             continue
+
+                        # Restore token_tracker context for this execution
+                        if captured_token_tracker is not None:
+                            current_token_tracker.set(captured_token_tracker)
 
                         # Get task state and mark worker as started
                         async with task_states_lock:
@@ -939,18 +944,21 @@ def priority_limit_async_func_call(
                     current_count = counter
                     counter += 1
 
+                # Capture token_tracker context for propagation to worker
+                captured_token_tracker = current_token_tracker.get()
+
                 # Queue the task with timeout handling
                 try:
                     if _queue_timeout is not None:
                         await asyncio.wait_for(
                             queue.put(
-                                (_priority, current_count, task_id, args, kwargs)
+                                (_priority, current_count, task_id, args, kwargs, captured_token_tracker)
                             ),
                             timeout=_queue_timeout,
                         )
                     else:
                         await queue.put(
-                            (_priority, current_count, task_id, args, kwargs)
+                            (_priority, current_count, task_id, args, kwargs, captured_token_tracker)
                         )
                 except asyncio.TimeoutError:
                     raise QueueFullError(
