@@ -650,7 +650,7 @@ def priority_limit_async_func_call(
     max_queue_size: int = 1000,
     cleanup_timeout: float = 2.0,
     queue_name: str = "limit_async",
-    worker_idle_timeout: int = 30,
+    worker_idle_timeout: int = 300,  # 5 minutes idle before worker exits (was 30s, too aggressive)
 ):
     """
     Enhanced priority-limited asynchronous function call decorator with robust timeout handling
@@ -917,9 +917,9 @@ def priority_limit_async_func_call(
                         f"{queue_name}: {active_tasks_count} tasks still running during reinitialization"
                     )
 
-                # Create initial worker tasks - start with minimal workers
+                # Create initial worker tasks - start with reasonable worker count
                 # Health check will scale up as needed when queue has pending work
-                initial_workers = min(4, max_size) - active_tasks_count  # Start with up to 4 workers
+                initial_workers = min(16, max_size) - active_tasks_count  # Start with up to 16 workers
                 if initial_workers > 0:
                     for _ in range(initial_workers):
                         task = asyncio.create_task(worker())
