@@ -1,0 +1,27 @@
+# Enforce that PRs to main must come from dev branch
+# This ensures the workflow: feature/* → dev → main
+
+name: Require PR from dev
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-source-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check source branch is dev
+        run: |
+          if [[ "${{ github.head_ref }}" != "dev" ]]; then
+            echo "❌ ERROR: PRs to main must come from the 'dev' branch"
+            echo ""
+            echo "Current source branch: ${{ github.head_ref }}"
+            echo "Expected source branch: dev"
+            echo ""
+            echo "Workflow: feature/* → PR → dev → PR → main"
+            echo ""
+            echo "Please merge your changes to 'dev' first, then create a PR from 'dev' to 'main'"
+            exit 1
+          fi
+          echo "✅ PR comes from dev branch - OK"
