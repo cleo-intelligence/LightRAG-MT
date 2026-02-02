@@ -1,0 +1,5 @@
+# CODEOWNERS - Defines who must approve PRs to protected branches
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default: cleo-ia must approve all changes to main
+* @cleo-ia

@@ -3,26 +3,28 @@
 #
 # Deploy: Connect repo on Render Dashboard → New Blueprint
 # All secrets (API keys, passwords) should be set in Render Dashboard
+#
+# Branch Strategy:
+#   - dev branch  → lightrag-mt-dev (Standard plan)
+#   - main branch → lightrag-mt-prod (Pro plan)
+#
+# Workflow: feature/* → PR → dev → PR → main
 
 services:
+  #############################
+  # PRODUCTION (main branch)
+  #############################
   - type: web
-    name: lightrag-mt
+    name: lightrag-mt-prod
     runtime: docker
     dockerfilePath: ./Dockerfile
-    region: frankfurt  # EU region for lower latency
-    plan: pro          # 4GB RAM, 2 CPU - required for multi-instance + stored procedures workloads
+    region: frankfurt
+    plan: pro  # 4GB RAM, 2 CPU - production workloads
+    branch: main
 
-    # Health check endpoint
     healthCheckPath: /health
-
-    # Auto-deploy on push
     autoDeploy: true
-
-    # Graceful shutdown: wait up to 300s for pipelines to complete before terminating
-    # This allows document processing to finish during scale-down
     maxShutdownDelaySeconds: 300
-
-    # No disk needed - all data stored in PostgreSQL
 
     envVars:
       #############################
@@ -43,7 +45,7 @@ services:
       - key: LIGHTRAG_DEFAULT_WORKSPACE
         value: "default"
       - key: LIGHTRAG_ALLOW_DEFAULT_WORKSPACE
-        value: "false"  # Reject requests without explicit workspace header
+        value: "false"
       - key: LIGHTRAG_MAX_WORKSPACES_IN_POOL
         value: "50"
 
@@ -68,25 +70,25 @@ services:
         value: "PGGraphStorageSimple"
 
       #############################
-      # PostgreSQL (Supabase via Supavisor Transaction Pooler)
+      # PostgreSQL - PRODUCTION
+      # Set POSTGRES_PASSWORD in Render Dashboard
       #############################
       - key: POSTGRES_HOST
         value: "db.apmyydkiuvrvvhuwsbmp.supabase.co"
       - key: POSTGRES_PORT
-        value: "6543"  # Supavisor transaction pooler (not 5432 direct)
+        value: "6543"
       - key: POSTGRES_USER
         value: "postgres"
       - key: POSTGRES_DATABASE
         value: "postgres"
       - key: POSTGRES_PASSWORD
-        sync: false  # Set in Render Dashboard as secret
+        sync: false
       - key: POSTGRES_STATEMENT_CACHE_SIZE
-        value: "0"  # Required for Supavisor transaction mode (no prepared statements)
+        value: "0"
       - key: POSTGRES_MAX_CONNECTIONS
-        value: "100"  # asyncpg pool size per instance (Supavisor handles multiplexing)
+        value: "100"
       - key: POSTGRES_MAX_INACTIVE_CONNECTION_LIFETIME
         value: "60"
-      # Retry configuration for transient errors (deadlocks, connection issues)
       - key: POSTGRES_CONNECTION_RETRY_ATTEMPTS
         value: "5"
       - key: POSTGRES_CONNECTION_RETRY_BACKOFF
@@ -95,21 +97,21 @@ services:
         value: "10.0"
 
       #############################
-      # LLM Configuration (Direct OpenAI - Tier 4)
+      # LLM Configuration
       #############################
       - key: LLM_BINDING
         value: "openai"
       - key: LLM_BINDING_HOST
         value: "https://api.openai.com/v1"
       - key: LLM_MODEL
-        value: "gpt-5-nano"  # Fast & cheap, ideal for entity extraction
+        value: "gpt-5-nano"
       - key: LLM_BINDING_API_KEY
-        sync: false  # Set in Render Dashboard as secret
+        sync: false
       - key: LLM_TIMEOUT
-        value: "300"  # Worker timeout = LLM_TIMEOUT * 3 + 30 = 930s
+        value: "300"
 
       #############################
-      # Embedding Configuration (Direct OpenAI - Tier 4)
+      # Embedding Configuration
       #############################
       - key: EMBEDDING_BINDING
         value: "openai"
@@ -124,10 +126,10 @@ services:
       - key: EMBEDDING_FUNC_MAX_ASYNC
         value: "32"
       - key: EMBEDDING_BINDING_API_KEY
-        sync: false  # Set in Render Dashboard as secret
+        sync: false
 
       #############################
-      # Rerank Configuration (Vercel AI Gateway)
+      # Rerank Configuration
       #############################
       - key: RERANK_BINDING
         value: "cohere"
@@ -144,7 +146,7 @@ services:
       - key: MIN_RERANK_SCORE
         value: "0.0"
       - key: RERANK_BINDING_API_KEY
-        sync: false  # Set in Render Dashboard as secret
+        sync: false
 
       #############################
       # Entity Resolution
@@ -171,16 +173,14 @@ services:
         value: "10"
 
       #############################
-      # Entity Maturity (LLM Call Optimization)
-      # Reduces LLM summarization calls by accumulating new descriptions
-      # in a pending field instead of re-summarizing on every merge
+      # Entity Maturity
       #############################
       - key: ENABLE_ENTITY_MATURITY
         value: "true"
       - key: PENDING_SUMMARIZE_THRESHOLD
-        value: "4000"  # tokens threshold to trigger re-summarization
+        value: "4000"
       - key: FORCE_LLM_SUMMARY_ON_MERGE
-        value: "20"  # Number of description fragments to trigger LLM summary
+        value: "20"
 
       #############################
       # Performance Configuration
@@ -192,9 +192,9 @@ services:
       - key: MAX_GRAPH_NODES
         value: "3000"
       - key: MIN_DEGREE_FOR_GRAPH_BFS
-        value: "2"  # Exclude peripheral nodes (degree < 2) from graph visualization
+        value: "2"
       - key: GRAPH_MAX_ASYNC_MULTIPLIER
-        value: "4"  # Multiplier for async operations in graph storage
+        value: "4"
       - key: CPU_YIELD_INTERVAL
         value: "50"
 
@@ -202,4 +202,198 @@ services:
       # API Security
       #############################
       - key: LIGHTRAG_API_KEY
-        sync: false  # Set in Render Dashboard as secret
+        sync: false
+
+  #############################
+  # DEVELOPMENT (dev branch)
+  #############################
+  - type: web
+    name: lightrag-mt-dev
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: frankfurt
+    plan: standard  # 1GB RAM, 0.5 CPU - sufficient for dev/testing
+    branch: dev
+
+    healthCheckPath: /health
+    autoDeploy: true
+    maxShutdownDelaySeconds: 60  # Shorter for dev
+
+    envVars:
+      #############################
+      # Server Configuration
+      #############################
+      - key: PORT
+        value: "9621"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: WHITELIST_PATHS
+        value: "/health"
+      - key: SUMMARY_LANGUAGE
+        value: "French"
+
+      #############################
+      # Multi-Workspace Configuration
+      #############################
+      - key: LIGHTRAG_DEFAULT_WORKSPACE
+        value: "default"
+      - key: LIGHTRAG_ALLOW_DEFAULT_WORKSPACE
+        value: "false"
+      - key: LIGHTRAG_MAX_WORKSPACES_IN_POOL
+        value: "20"  # Lower for dev
+
+      #############################
+      # Storage Paths
+      #############################
+      - key: WORKING_DIR
+        value: "/app/data/rag_storage"
+      - key: INPUT_DIR
+        value: "/app/data/inputs"
+
+      #############################
+      # Storage Backends (Full PostgreSQL)
+      #############################
+      - key: LIGHTRAG_KV_STORAGE
+        value: "PGKVStorage"
+      - key: LIGHTRAG_DOC_STATUS_STORAGE
+        value: "PGDocStatusStorage"
+      - key: LIGHTRAG_VECTOR_STORAGE
+        value: "PGVectorStorage"
+      - key: LIGHTRAG_GRAPH_STORAGE
+        value: "PGGraphStorageSimple"
+
+      #############################
+      # PostgreSQL - DEV
+      # Use same DB but different workspaces, OR set up separate dev DB
+      # Set POSTGRES_PASSWORD in Render Dashboard
+      #############################
+      - key: POSTGRES_HOST
+        value: "db.apmyydkiuvrvvhuwsbmp.supabase.co"
+      - key: POSTGRES_PORT
+        value: "6543"
+      - key: POSTGRES_USER
+        value: "postgres"
+      - key: POSTGRES_DATABASE
+        value: "postgres"
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: POSTGRES_STATEMENT_CACHE_SIZE
+        value: "0"
+      - key: POSTGRES_MAX_CONNECTIONS
+        value: "50"  # Lower for dev
+      - key: POSTGRES_MAX_INACTIVE_CONNECTION_LIFETIME
+        value: "60"
+      - key: POSTGRES_CONNECTION_RETRY_ATTEMPTS
+        value: "5"
+      - key: POSTGRES_CONNECTION_RETRY_BACKOFF
+        value: "1.0"
+      - key: POSTGRES_CONNECTION_RETRY_BACKOFF_MAX
+        value: "10.0"
+
+      #############################
+      # LLM Configuration
+      #############################
+      - key: LLM_BINDING
+        value: "openai"
+      - key: LLM_BINDING_HOST
+        value: "https://api.openai.com/v1"
+      - key: LLM_MODEL
+        value: "gpt-5-nano"
+      - key: LLM_BINDING_API_KEY
+        sync: false
+      - key: LLM_TIMEOUT
+        value: "300"
+
+      #############################
+      # Embedding Configuration
+      #############################
+      - key: EMBEDDING_BINDING
+        value: "openai"
+      - key: EMBEDDING_BINDING_HOST
+        value: "https://api.openai.com/v1"
+      - key: EMBEDDING_MODEL
+        value: "text-embedding-3-small"
+      - key: EMBEDDING_DIM
+        value: "1536"
+      - key: EMBEDDING_BATCH_NUM
+        value: "60"
+      - key: EMBEDDING_FUNC_MAX_ASYNC
+        value: "32"
+      - key: EMBEDDING_BINDING_API_KEY
+        sync: false
+
+      #############################
+      # Rerank Configuration
+      #############################
+      - key: RERANK_BINDING
+        value: "cohere"
+      - key: RERANK_BINDING_HOST
+        value: "https://ai-gateway.vercel.sh/v1"
+      - key: RERANK_MODEL
+        value: "cohere/rerank-v3.5"
+      - key: RERANK_BY_DEFAULT
+        value: "true"
+      - key: RERANK_ENABLE_CHUNKING
+        value: "true"
+      - key: RERANK_MAX_TOKENS_PER_DOC
+        value: "480"
+      - key: MIN_RERANK_SCORE
+        value: "0.0"
+      - key: RERANK_BINDING_API_KEY
+        sync: false
+
+      #############################
+      # Entity Resolution
+      #############################
+      - key: ENABLE_ENTITY_RESOLUTION
+        value: "true"
+      - key: ENTITY_SIMILARITY_THRESHOLD
+        value: "0.92"
+      - key: ENTITY_MIN_NAME_LENGTH
+        value: "2"
+      - key: PREFER_SHORTER_CANONICAL_NAME
+        value: "true"
+      - key: ENABLE_CONFLICT_DETECTION
+        value: "false"
+
+      #############################
+      # Cross-Document Resolution
+      #############################
+      - key: CROSS_DOC_RESOLUTION_MODE
+        value: "hybrid"
+      - key: CROSS_DOC_THRESHOLD_ENTITIES
+        value: "5000"
+      - key: CROSS_DOC_VDB_TOP_K
+        value: "10"
+
+      #############################
+      # Entity Maturity
+      #############################
+      - key: ENABLE_ENTITY_MATURITY
+        value: "true"
+      - key: PENDING_SUMMARIZE_THRESHOLD
+        value: "4000"
+      - key: FORCE_LLM_SUMMARY_ON_MERGE
+        value: "20"
+
+      #############################
+      # Performance Configuration (reduced for dev)
+      #############################
+      - key: MAX_ASYNC
+        value: "128"
+      - key: MAX_PARALLEL_INSERT
+        value: "16"
+      - key: MAX_GRAPH_NODES
+        value: "1000"
+      - key: MIN_DEGREE_FOR_GRAPH_BFS
+        value: "2"
+      - key: GRAPH_MAX_ASYNC_MULTIPLIER
+        value: "2"
+      - key: CPU_YIELD_INTERVAL
+        value: "50"
+
+      #############################
+      # API Security
+      #############################
+      - key: LIGHTRAG_API_KEY
+        sync: false
