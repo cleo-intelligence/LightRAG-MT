@@ -21,7 +21,6 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
     retry_if_exception_type,
-    before_sleep_log,
 )
 from lightrag.utils import (
     wrap_embedding_func_with_attrs,
@@ -321,7 +320,11 @@ async def openai_complete_if_cache(
     api_model = azure_deployment if use_azure and azure_deployment else model
 
     # Estimate prompt size for logging
-    prompt_chars = len(prompt) + len(system_prompt or "") + sum(len(m.get("content", "")) for m in history_messages)
+    prompt_chars = (
+        len(prompt)
+        + len(system_prompt or "")
+        + sum(len(m.get("content", "")) for m in history_messages)
+    )
     logger.info(
         f"LLM call starting: model={api_model}, timeout={timeout}s, "
         f"prompt_chars={prompt_chars}, base_url={base_url}"
@@ -339,7 +342,9 @@ async def openai_complete_if_cache(
                 model=api_model, messages=messages, **kwargs
             )
         call_duration = time.time() - call_start_time
-        logger.info(f"LLM call completed: model={api_model}, duration={call_duration:.2f}s")
+        logger.info(
+            f"LLM call completed: model={api_model}, duration={call_duration:.2f}s"
+        )
     except APITimeoutError as e:
         call_duration = time.time() - call_start_time
         logger.error(f"OpenAI API Timeout after {call_duration:.2f}s: {e}")
@@ -616,7 +621,9 @@ async def openai_complete_if_cache(
                     ),
                     "total_tokens": getattr(response.usage, "total_tokens", 0),
                 }
-                token_tracker.add_usage(token_counts, model=getattr(response, "model", model))
+                token_tracker.add_usage(
+                    token_counts, model=getattr(response, "model", model)
+                )
 
             logger.debug(f"Response content len: {len(final_content)}")
             verbose_debug(f"Response: {response}")
@@ -812,7 +819,9 @@ async def openai_embed(
         response = await openai_async_client.embeddings.create(**api_params)
 
         call_duration = time.time() - call_start_time
-        logger.info(f"Embedding call completed: model={api_model}, duration={call_duration:.2f}s")
+        logger.info(
+            f"Embedding call completed: model={api_model}, duration={call_duration:.2f}s"
+        )
 
         # Use explicit token_tracker, or fall back to context variable
         effective_tracker = token_tracker or current_token_tracker.get()

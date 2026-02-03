@@ -107,7 +107,9 @@ class TestConflictDetector:
         conflicts = detector.detect_conflicts("Apple", descriptions)
 
         assert len(conflicts) >= 1
-        attribution_conflicts = [c for c in conflicts if c.conflict_type == "attribution"]
+        attribution_conflicts = [
+            c for c in conflicts if c.conflict_type == "attribution"
+        ]
         assert len(attribution_conflicts) >= 1
         # Check that both names are detected
         values = {attribution_conflicts[0].value_a, attribution_conflicts[0].value_b}
@@ -322,7 +324,9 @@ class TestPatternExtraction:
         """Test monetary value extraction."""
         detector = ConflictDetector()
 
-        values = detector._extract_values("Revenue was $100 million.", detector.NUMBER_PATTERNS)
+        values = detector._extract_values(
+            "Revenue was $100 million.", detector.NUMBER_PATTERNS
+        )
         assert len(values) >= 1
 
     def test_extract_attribution(self):
@@ -385,9 +389,7 @@ class TestTemporalConflictFiltering:
 
         # With entity_type="data", temporal conflicts should be skipped
         conflicts = detector.detect_conflicts(
-            "Période Du 01/01/2022 Au 31/12/2022",
-            descriptions,
-            entity_type="data"
+            "Période Du 01/01/2022 Au 31/12/2022", descriptions, entity_type="data"
         )
 
         temporal_conflicts = [c for c in conflicts if c.conflict_type == "temporal"]
@@ -404,9 +406,7 @@ class TestTemporalConflictFiltering:
 
         # With entity_type="artifact", temporal conflicts should be skipped
         conflicts = detector.detect_conflicts(
-            "SFJB Report",
-            descriptions,
-            entity_type="artifact"
+            "SFJB Report", descriptions, entity_type="artifact"
         )
 
         temporal_conflicts = [c for c in conflicts if c.conflict_type == "temporal"]
@@ -427,9 +427,7 @@ class TestTemporalConflictFiltering:
 
         # With entity_type="person", temporal conflicts should be skipped
         conflicts = detector.detect_conflicts(
-            "Jacques Bondoux",
-            descriptions,
-            entity_type="person"
+            "Jacques Bondoux", descriptions, entity_type="person"
         )
 
         temporal_conflicts = [c for c in conflicts if c.conflict_type == "temporal"]
@@ -450,9 +448,7 @@ class TestTemporalConflictFiltering:
 
         # With entity_type="organization", temporal conflicts should be skipped
         conflicts = detector.detect_conflicts(
-            "Tesla",
-            descriptions,
-            entity_type="organization"
+            "Tesla", descriptions, entity_type="organization"
         )
 
         temporal_conflicts = [c for c in conflicts if c.conflict_type == "temporal"]
@@ -469,9 +465,7 @@ class TestTemporalConflictFiltering:
 
         # With no entity_type specified, temporal conflicts should be detected
         conflicts = detector.detect_conflicts(
-            "SomeEvent",
-            descriptions,
-            entity_type=None
+            "SomeEvent", descriptions, entity_type=None
         )
 
         temporal_conflicts = [c for c in conflicts if c.conflict_type == "temporal"]
@@ -488,9 +482,7 @@ class TestTemporalConflictFiltering:
 
         # The entity name contains "2018", so 2018 vs other years should be filtered
         conflicts = detector.detect_conflicts(
-            "SFJB 2018",
-            descriptions,
-            entity_type="organization"
+            "SFJB 2018", descriptions, entity_type="organization"
         )
 
         # 2018 should not trigger conflict because it's in entity name
@@ -514,7 +506,7 @@ class TestTemporalConflictFiltering:
         conflicts = detector.detect_conflicts(
             "Sales Data",
             descriptions,
-            entity_type="organization"  # Not a "data" type
+            entity_type="organization",  # Not a "data" type
         )
 
         temporal_conflicts = [c for c in conflicts if c.conflict_type == "temporal"]
@@ -531,9 +523,7 @@ class TestTemporalConflictFiltering:
         ]
 
         conflicts = detector.detect_conflicts(
-            "Fiscal Period",
-            descriptions,
-            entity_type="organization"
+            "Fiscal Period", descriptions, entity_type="organization"
         )
 
         temporal_conflicts = [c for c in conflicts if c.conflict_type == "temporal"]
@@ -550,12 +540,12 @@ class TestTemporalConflictFiltering:
 
         # Even with entity_type="data", attribution conflicts should be detected
         conflicts = detector.detect_conflicts(
-            "Report 2022",
-            descriptions,
-            entity_type="data"
+            "Report 2022", descriptions, entity_type="data"
         )
 
-        attribution_conflicts = [c for c in conflicts if c.conflict_type == "attribution"]
+        attribution_conflicts = [
+            c for c in conflicts if c.conflict_type == "attribution"
+        ]
         assert len(attribution_conflicts) >= 1
 
     def test_mixed_period_and_standalone_dates(self):
@@ -564,21 +554,26 @@ class TestTemporalConflictFiltering:
 
         # Ensure standalone dates are far from period patterns (>50 chars)
         descriptions = [
-            ("The item was created in 2003. This is important historical information that should be noted for reference.", "doc_001"),
-            ("The item was created in 2004. Another description with different creation year.", "doc_002"),
+            (
+                "The item was created in 2003. This is important historical information that should be noted for reference.",
+                "doc_001",
+            ),
+            (
+                "The item was created in 2004. Another description with different creation year.",
+                "doc_002",
+            ),
         ]
 
         # Use entity_type=None to test temporal detection (organizations skip it)
         conflicts = detector.detect_conflicts(
-            "SomeItem",
-            descriptions,
-            entity_type=None
+            "SomeItem", descriptions, entity_type=None
         )
 
         temporal_conflicts = [c for c in conflicts if c.conflict_type == "temporal"]
         # 2003 vs 2004 should be detected (standalone dates, no period pattern nearby)
         standalone_conflicts = [
-            c for c in temporal_conflicts
+            c
+            for c in temporal_conflicts
             if ("2003" in c.value_a or "2003" in c.value_b)
             and ("2004" in c.value_a or "2004" in c.value_b)
         ]

@@ -8,7 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from lightrag.base import QueryParam
 from lightrag.api.utils_api import get_combined_auth_dependency
 from lightrag.api.workspace_manager import get_rag
-from lightrag.api.models.usage import UsageInfo, QueryTokenUsage, calculate_estimated_cost
+from lightrag.api.models.usage import (
+    UsageInfo,
+    QueryTokenUsage,
+    calculate_estimated_cost,
+)
 from lightrag.utils import logger, TokenTracker
 from pydantic import BaseModel, Field, field_validator
 

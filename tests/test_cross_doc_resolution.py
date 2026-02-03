@@ -6,11 +6,9 @@ for cross-document entity resolution in large knowledge graphs.
 """
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from collections import defaultdict
+from unittest.mock import AsyncMock
 
 from lightrag.constants import (
-    DEFAULT_CROSS_DOC_RESOLUTION_MODE,
     DEFAULT_CROSS_DOC_THRESHOLD_ENTITIES,
     DEFAULT_CROSS_DOC_VDB_TOP_K,
     DEFAULT_ENTITY_SIMILARITY_THRESHOLD,
@@ -26,11 +24,13 @@ class TestVDBResolution:
         """Create a mock knowledge graph storage."""
         mock = AsyncMock()
         mock.get_node_count = AsyncMock(return_value=10000)
-        mock.get_all_nodes = AsyncMock(return_value=[
-            {"entity_id": "Apple Inc", "entity_type": "ORGANIZATION"},
-            {"entity_id": "Google LLC", "entity_type": "ORGANIZATION"},
-            {"entity_id": "Microsoft Corporation", "entity_type": "ORGANIZATION"},
-        ])
+        mock.get_all_nodes = AsyncMock(
+            return_value=[
+                {"entity_id": "Apple Inc", "entity_type": "ORGANIZATION"},
+                {"entity_id": "Google LLC", "entity_type": "ORGANIZATION"},
+                {"entity_id": "Microsoft Corporation", "entity_type": "ORGANIZATION"},
+            ]
+        )
         return mock
 
     @pytest.fixture
@@ -38,10 +38,16 @@ class TestVDBResolution:
         """Create a mock entity VDB storage."""
         mock = AsyncMock()
         # Default: return similar entities for queries
-        mock.query = AsyncMock(return_value=[
-            {"id": "Apple Inc", "distance": 0.1, "entity_type": "ORGANIZATION"},
-            {"id": "Apple Computer", "distance": 0.2, "entity_type": "ORGANIZATION"},
-        ])
+        mock.query = AsyncMock(
+            return_value=[
+                {"id": "Apple Inc", "distance": 0.1, "entity_type": "ORGANIZATION"},
+                {
+                    "id": "Apple Computer",
+                    "distance": 0.2,
+                    "entity_type": "ORGANIZATION",
+                },
+            ]
+        )
         return mock
 
     @pytest.fixture
@@ -64,13 +70,17 @@ class TestVDBResolution:
         from lightrag.operate import _resolve_cross_document_entities_vdb
 
         all_nodes = {
-            "Apple Inc.": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
+            "Apple Inc.": [
+                {"entity_type": "ORGANIZATION", "description": "Tech company"}
+            ],
         }
 
         # VDB returns similar entity
-        mock_entity_vdb.query = AsyncMock(return_value=[
-            {"id": "Apple Inc", "distance": 0.05, "entity_type": "ORGANIZATION"},
-        ])
+        mock_entity_vdb.query = AsyncMock(
+            return_value=[
+                {"id": "Apple Inc", "distance": 0.05, "entity_type": "ORGANIZATION"},
+            ]
+        )
 
         resolved_nodes, resolution_map = await _resolve_cross_document_entities_vdb(
             all_nodes=all_nodes,
@@ -97,9 +107,15 @@ class TestVDBResolution:
         }
 
         # VDB returns entity of different type
-        mock_entity_vdb.query = AsyncMock(return_value=[
-            {"id": "Apple", "distance": 0.0, "entity_type": "FRUIT"},  # Different type!
-        ])
+        mock_entity_vdb.query = AsyncMock(
+            return_value=[
+                {
+                    "id": "Apple",
+                    "distance": 0.0,
+                    "entity_type": "FRUIT",
+                },  # Different type!
+            ]
+        )
 
         resolved_nodes, resolution_map = await _resolve_cross_document_entities_vdb(
             all_nodes=all_nodes,
@@ -121,7 +137,9 @@ class TestVDBResolution:
         from lightrag.operate import _resolve_cross_document_entities_vdb
 
         all_nodes = {
-            "Unique Entity XYZ": [{"entity_type": "ORGANIZATION", "description": "Unique"}],
+            "Unique Entity XYZ": [
+                {"entity_type": "ORGANIZATION", "description": "Unique"}
+            ],
         }
 
         # VDB returns no candidates
@@ -175,15 +193,21 @@ class TestHybridMode:
 
         # Graph has only 1000 entities (below 5000 threshold)
         mock_knowledge_graph.get_node_count = AsyncMock(return_value=1000)
-        mock_knowledge_graph.get_all_nodes = AsyncMock(return_value=[
-            {"entity_id": "Apple Inc", "entity_type": "ORGANIZATION"},
-        ])
+        mock_knowledge_graph.get_all_nodes = AsyncMock(
+            return_value=[
+                {"entity_id": "Apple Inc", "entity_type": "ORGANIZATION"},
+            ]
+        )
 
         all_nodes = {
             "Apple Inc.": [{"entity_type": "ORGANIZATION", "description": "Tech"}],
         }
 
-        resolved_nodes, resolution_map, mode_used = await _resolve_cross_document_entities_hybrid(
+        (
+            resolved_nodes,
+            resolution_map,
+            mode_used,
+        ) = await _resolve_cross_document_entities_hybrid(
             all_nodes=all_nodes,
             knowledge_graph_inst=mock_knowledge_graph,
             entity_vdb=mock_entity_vdb,
@@ -211,7 +235,11 @@ class TestHybridMode:
             "Apple Inc.": [{"entity_type": "ORGANIZATION", "description": "Tech"}],
         }
 
-        resolved_nodes, resolution_map, mode_used = await _resolve_cross_document_entities_hybrid(
+        (
+            resolved_nodes,
+            resolution_map,
+            mode_used,
+        ) = await _resolve_cross_document_entities_hybrid(
             all_nodes=all_nodes,
             knowledge_graph_inst=mock_knowledge_graph,
             entity_vdb=mock_entity_vdb,
@@ -237,7 +265,11 @@ class TestHybridMode:
             "Test Entity": [{"entity_type": "ORGANIZATION", "description": "Test"}],
         }
 
-        resolved_nodes, resolution_map, mode_used = await _resolve_cross_document_entities_hybrid(
+        (
+            resolved_nodes,
+            resolution_map,
+            mode_used,
+        ) = await _resolve_cross_document_entities_hybrid(
             all_nodes=all_nodes,
             knowledge_graph_inst=mock_knowledge_graph,
             entity_vdb=mock_entity_vdb,
@@ -290,7 +322,11 @@ class TestConfigurableResolution:
             "Test Entity": [{"entity_type": "ORGANIZATION", "description": "Test"}],
         }
 
-        resolved_nodes, resolution_map, mode_used = await _resolve_cross_document_entities_hybrid(
+        (
+            resolved_nodes,
+            resolution_map,
+            mode_used,
+        ) = await _resolve_cross_document_entities_hybrid(
             all_nodes=all_nodes,
             knowledge_graph_inst=mock_knowledge_graph,
             entity_vdb=mock_entity_vdb,
@@ -322,7 +358,11 @@ class TestConfigurableResolution:
             "Test Entity": [{"entity_type": "ORGANIZATION", "description": "Test"}],
         }
 
-        resolved_nodes, resolution_map, mode_used = await _resolve_cross_document_entities_hybrid(
+        (
+            resolved_nodes,
+            resolution_map,
+            mode_used,
+        ) = await _resolve_cross_document_entities_hybrid(
             all_nodes=all_nodes,
             knowledge_graph_inst=mock_knowledge_graph,
             entity_vdb=mock_entity_vdb,
@@ -349,10 +389,16 @@ class TestConfigurableResolution:
 
         all_nodes = {
             "Apple Inc.": [{"entity_type": "ORGANIZATION", "description": "Tech"}],
-            "Apple Inc": [{"entity_type": "ORGANIZATION", "description": "Same company"}],
+            "Apple Inc": [
+                {"entity_type": "ORGANIZATION", "description": "Same company"}
+            ],
         }
 
-        resolved_nodes, resolution_map, mode_used = await _resolve_cross_document_entities_hybrid(
+        (
+            resolved_nodes,
+            resolution_map,
+            mode_used,
+        ) = await _resolve_cross_document_entities_hybrid(
             all_nodes=all_nodes,
             knowledge_graph_inst=mock_knowledge_graph,
             entity_vdb=mock_entity_vdb,
@@ -389,7 +435,11 @@ class TestConfigurableResolution:
             "Test Entity": [{"entity_type": "ORGANIZATION", "description": "Test"}],
         }
 
-        resolved_nodes, resolution_map, mode_used = await _resolve_cross_document_entities_hybrid(
+        (
+            resolved_nodes,
+            resolution_map,
+            mode_used,
+        ) = await _resolve_cross_document_entities_hybrid(
             all_nodes=all_nodes,
             knowledge_graph_inst=mock_knowledge_graph,
             entity_vdb=mock_entity_vdb,
@@ -420,9 +470,7 @@ class TestObservabilityMetrics:
 
     # T034: test_resolution_logs_metrics
     @pytest.mark.asyncio
-    async def test_resolution_logs_metrics(
-        self, mock_knowledge_graph, mock_entity_vdb
-    ):
+    async def test_resolution_logs_metrics(self, mock_knowledge_graph, mock_entity_vdb):
         """Test that resolution returns metrics for logging: mode, entities, duplicates."""
         from lightrag.operate import _resolve_cross_document_entities_hybrid
 
@@ -438,7 +486,11 @@ class TestObservabilityMetrics:
             "Test Entity": [{"entity_type": "ORGANIZATION", "description": "Test"}],
         }
 
-        resolved_nodes, resolution_map, mode_used = await _resolve_cross_document_entities_hybrid(
+        (
+            resolved_nodes,
+            resolution_map,
+            mode_used,
+        ) = await _resolve_cross_document_entities_hybrid(
             all_nodes=all_nodes,
             knowledge_graph_inst=mock_knowledge_graph,
             entity_vdb=mock_entity_vdb,
@@ -476,7 +528,11 @@ class TestObservabilityMetrics:
             "Test Entity": [{"entity_type": "ORGANIZATION", "description": "Test"}],
         }
 
-        resolved_nodes, resolution_map, mode_used = await _resolve_cross_document_entities_hybrid(
+        (
+            resolved_nodes,
+            resolution_map,
+            mode_used,
+        ) = await _resolve_cross_document_entities_hybrid(
             all_nodes=all_nodes,
             knowledge_graph_inst=mock_knowledge_graph,
             entity_vdb=mock_entity_vdb,

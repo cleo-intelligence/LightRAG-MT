@@ -26,7 +26,11 @@ from dataclasses import asdict
 
 from lightrag import LightRAG
 from lightrag.base import DeletionResult, DocProcessingStatus, DocStatus
-from lightrag.utils import generate_track_id, sanitize_text_for_encoding, compute_mdhash_id
+from lightrag.utils import (
+    generate_track_id,
+    sanitize_text_for_encoding,
+    compute_mdhash_id,
+)
 from lightrag.exceptions import PipelineNotInitializedError
 from lightrag.operate import rebuild_knowledge_from_chunks
 from lightrag.api.utils_api import get_combined_auth_dependency
@@ -289,7 +293,9 @@ class InsertResponse(BaseModel):
         track_id: Tracking ID for monitoring processing status
     """
 
-    status: Literal["success", "duplicated", "in_progress", "partial_success", "failure"] = Field(
+    status: Literal[
+        "success", "duplicated", "in_progress", "partial_success", "failure"
+    ] = Field(
         description="Status of the operation. 'in_progress' indicates content is already being processed - use returned track_id to poll."
     )
     message: str = Field(description="Message describing the operation result")
@@ -556,11 +562,11 @@ class DocStatusResponse(BaseModel):
     file_path: str = Field(description="Path to the document file")
     is_duplicate: bool = Field(
         default=False,
-        description="True if this document was detected as a duplicate of existing content"
+        description="True if this document was detected as a duplicate of existing content",
     )
     original_doc_id: Optional[str] = Field(
         default=None,
-        description="If is_duplicate=true, the doc_id of the original document"
+        description="If is_duplicate=true, the doc_id of the original document",
     )
 
     class Config:
@@ -1999,22 +2005,35 @@ async def background_delete_documents(
 
                     # Collect rebuild data for batch processing (single rebuild at end)
                     if is_batch_deletion and result.entities_to_rebuild:
-                        for entity_name, chunk_ids in result.entities_to_rebuild.items():
+                        for (
+                            entity_name,
+                            chunk_ids,
+                        ) in result.entities_to_rebuild.items():
                             if entity_name not in all_entities_to_rebuild:
                                 all_entities_to_rebuild[entity_name] = []
                             # Merge chunk IDs, avoiding duplicates
                             for chunk_id in chunk_ids:
                                 if chunk_id not in all_entities_to_rebuild[entity_name]:
-                                    all_entities_to_rebuild[entity_name].append(chunk_id)
+                                    all_entities_to_rebuild[entity_name].append(
+                                        chunk_id
+                                    )
 
                     if is_batch_deletion and result.relationships_to_rebuild:
-                        for rel_key, chunk_ids in result.relationships_to_rebuild.items():
+                        for (
+                            rel_key,
+                            chunk_ids,
+                        ) in result.relationships_to_rebuild.items():
                             if rel_key not in all_relationships_to_rebuild:
                                 all_relationships_to_rebuild[rel_key] = []
                             # Merge chunk IDs, avoiding duplicates
                             for chunk_id in chunk_ids:
-                                if chunk_id not in all_relationships_to_rebuild[rel_key]:
-                                    all_relationships_to_rebuild[rel_key].append(chunk_id)
+                                if (
+                                    chunk_id
+                                    not in all_relationships_to_rebuild[rel_key]
+                                ):
+                                    all_relationships_to_rebuild[rel_key].append(
+                                        chunk_id
+                                    )
 
                     # Handle file deletion if requested and file_path is available
                     if (
@@ -2139,7 +2158,9 @@ async def background_delete_documents(
                     pipeline_status["history_messages"].append(error_msg)
 
         # Perform single rebuild at end of batch deletion with all accumulated data
-        if is_batch_deletion and (all_entities_to_rebuild or all_relationships_to_rebuild):
+        if is_batch_deletion and (
+            all_entities_to_rebuild or all_relationships_to_rebuild
+        ):
             try:
                 rebuild_msg = f"Starting single rebuild for batch deletion: {len(all_entities_to_rebuild)} entities, {len(all_relationships_to_rebuild)} relationships"
                 logger.info(rebuild_msg)
@@ -2169,7 +2190,9 @@ async def background_delete_documents(
                     pipeline_status["history_messages"].append(rebuild_complete_msg)
 
             except Exception as rebuild_error:
-                rebuild_error_msg = f"Failed to rebuild knowledge after batch deletion: {rebuild_error}"
+                rebuild_error_msg = (
+                    f"Failed to rebuild knowledge after batch deletion: {rebuild_error}"
+                )
                 logger.error(rebuild_error_msg)
                 logger.error(traceback.format_exc())
                 async with pipeline_status_lock:
@@ -2209,9 +2232,7 @@ async def background_delete_documents(
                 logger.error(f"Error processing pending documents after deletion: {e}")
 
 
-def create_document_routes(
-    doc_manager: DocumentManager, api_key: Optional[str] = None
-):
+def create_document_routes(doc_manager: DocumentManager, api_key: Optional[str] = None):
     """
     Create document routes for the LightRAG API.
 
@@ -2258,7 +2279,9 @@ def create_document_routes(
         )
 
         # Start the scanning process in the background with track_id
-        background_tasks.add_task(run_scanning_process, rag, workspace_doc_manager, track_id)
+        background_tasks.add_task(
+            run_scanning_process, rag, workspace_doc_manager, track_id
+        )
         return ScanResponse(
             status="scanning_started",
             message="Scanning process has been initiated in the background",
@@ -2328,7 +2351,9 @@ def create_document_routes(
             )
 
             # Sanitize filename to prevent Path Traversal attacks
-            safe_filename = sanitize_filename(file.filename, workspace_doc_manager.input_dir)
+            safe_filename = sanitize_filename(
+                file.filename, workspace_doc_manager.input_dir
+            )
 
             if not workspace_doc_manager.is_supported_file(safe_filename):
                 raise HTTPException(
@@ -2490,7 +2515,9 @@ def create_document_routes(
 
                     # Failed documents can be re-indexed - proceed to background task
                     if existing_status == "failed":
-                        logger.info(f"Document {doc_id} previously failed, allowing re-submission")
+                        logger.info(
+                            f"Document {doc_id} previously failed, allowing re-submission"
+                        )
                         # Don't insert here - let apipeline_enqueue_documents handle it
                     # Stuck documents can be re-submitted
                     elif _is_stuck_document(existing_doc):
@@ -2522,11 +2549,15 @@ def create_document_routes(
                             original_status=existing_status,
                         )
 
-                logger.debug(f"Document {doc_id} will be processed with track_id {track_id}")
+                logger.debug(
+                    f"Document {doc_id} will be processed with track_id {track_id}"
+                )
 
             except Exception as e:
                 # Non-blocking: if duplicate check fails, fall through to normal processing
-                logger.warning(f"Duplicate check failed, proceeding with normal flow: {e}")
+                logger.warning(
+                    f"Duplicate check failed, proceeding with normal flow: {e}"
+                )
 
             background_tasks.add_task(
                 pipeline_index_texts,
@@ -2636,7 +2667,9 @@ def create_document_routes(
 
                         # Failed documents can be re-indexed - count as processable
                         if existing_status == "failed":
-                            logger.info(f"Document {doc_id} previously failed, allowing re-submission")
+                            logger.info(
+                                f"Document {doc_id} previously failed, allowing re-submission"
+                            )
                             processable_count += 1
                         # Stuck documents can be re-submitted
                         elif _is_stuck_document(existing_doc):
@@ -2652,7 +2685,7 @@ def create_document_routes(
                             )
                             return InsertResponse(
                                 status="in_progress",
-                                message=f"Content of text #{i+1} ('{file_source}') is already being processed (Status: {existing_status}). Use track_id to poll status.",
+                                message=f"Content of text #{i + 1} ('{file_source}') is already being processed (Status: {existing_status}). Use track_id to poll status.",
                                 track_id=existing_doc.get("track_id") or "",
                                 doc_id=doc_id,
                                 original_status=existing_status,
@@ -2661,7 +2694,7 @@ def create_document_routes(
                             # True duplicate (processed, skipped, etc.) - return immediately
                             return InsertResponse(
                                 status="duplicated",
-                                message=f"Content of text #{i+1} ('{file_source}') already exists (Status: {existing_status}).",
+                                message=f"Content of text #{i + 1} ('{file_source}') already exists (Status: {existing_status}).",
                                 track_id=existing_doc.get("track_id") or "",
                                 doc_id=doc_id,
                                 original_status=existing_status,
@@ -2669,11 +2702,15 @@ def create_document_routes(
                     else:
                         processable_count += 1
 
-                logger.debug(f"Found {processable_count} processable documents for track_id {track_id}")
+                logger.debug(
+                    f"Found {processable_count} processable documents for track_id {track_id}"
+                )
 
             except Exception as e:
                 # Non-blocking: if duplicate check fails, fall through to normal processing
-                logger.warning(f"Duplicate check failed, proceeding with normal flow: {e}")
+                logger.warning(
+                    f"Duplicate check failed, proceeding with normal flow: {e}"
+                )
 
             background_tasks.add_task(
                 pipeline_index_texts,
@@ -2899,7 +2936,9 @@ def create_document_routes(
         dependencies=[Depends(combined_auth)],
         response_model=PipelineStatusResponse,
     )
-    async def get_pipeline_status(rag: LightRAG = Depends(get_rag)) -> PipelineStatusResponse:
+    async def get_pipeline_status(
+        rag: LightRAG = Depends(get_rag),
+    ) -> PipelineStatusResponse:
         """
         Get the current status of the document indexing pipeline.
 
@@ -3301,7 +3340,9 @@ def create_document_routes(
             busy_workspaces = []
             for ws_id in workspaces_to_clear:
                 try:
-                    pipeline_status = await get_namespace_data("pipeline_status", workspace=ws_id)
+                    pipeline_status = await get_namespace_data(
+                        "pipeline_status", workspace=ws_id
+                    )
                     if pipeline_status and pipeline_status.get("is_busy"):
                         busy_workspaces.append(ws_id)
                 except PipelineNotInitializedError:
@@ -3355,7 +3396,11 @@ def create_document_routes(
             if total_cleared == 0:
                 message = "No documents found in queue to clear"
             else:
-                parts = [f"{count} {status}" for status, count in total_counts.items() if count > 0]
+                parts = [
+                    f"{count} {status}"
+                    for status, count in total_counts.items()
+                    if count > 0
+                ]
                 ws_count = len(workspace_results)
                 if ws_count == 1:
                     message = f"Cleared {total_cleared} documents from queue ({', '.join(parts)})"
@@ -3380,7 +3425,9 @@ def create_document_routes(
         response_model=DeletionResult,
         dependencies=[Depends(combined_auth)],
     )
-    async def delete_entity(request: DeleteEntityRequest, rag: LightRAG = Depends(get_rag)):
+    async def delete_entity(
+        request: DeleteEntityRequest, rag: LightRAG = Depends(get_rag)
+    ):
         """
         Delete an entity and all its relationships from the knowledge graph.
 
@@ -3415,7 +3462,9 @@ def create_document_routes(
         response_model=DeletionResult,
         dependencies=[Depends(combined_auth)],
     )
-    async def delete_relation(request: DeleteRelationRequest, rag: LightRAG = Depends(get_rag)):
+    async def delete_relation(
+        request: DeleteRelationRequest, rag: LightRAG = Depends(get_rag)
+    ):
         """
         Delete a relationship between two entities from the knowledge graph.
 
@@ -3453,7 +3502,9 @@ def create_document_routes(
         response_model=TrackStatusResponse,
         dependencies=[Depends(combined_auth)],
     )
-    async def get_track_status(track_id: str, rag: LightRAG = Depends(get_rag)) -> TrackStatusResponse:
+    async def get_track_status(
+        track_id: str, rag: LightRAG = Depends(get_rag)
+    ) -> TrackStatusResponse:
         """
         Get the processing status of documents by tracking ID.
 
@@ -3626,7 +3677,9 @@ def create_document_routes(
         response_model=StatusCountsResponse,
         dependencies=[Depends(combined_auth)],
     )
-    async def get_document_status_counts(rag: LightRAG = Depends(get_rag)) -> StatusCountsResponse:
+    async def get_document_status_counts(
+        rag: LightRAG = Depends(get_rag),
+    ) -> StatusCountsResponse:
         """
         Get counts of documents by status.
 
