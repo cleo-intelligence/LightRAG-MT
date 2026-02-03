@@ -794,7 +794,9 @@ class DocStatusStorage(BaseKVStorage, ABC):
             Returns the same format as get_by_ids method
         """
 
-    async def try_claim(self, doc_id: str, data: dict[str, Any]) -> tuple[bool, dict[str, Any] | None]:
+    async def try_claim(
+        self, doc_id: str, data: dict[str, Any]
+    ) -> tuple[bool, dict[str, Any] | None]:
         """Atomically try to claim a document ID for processing.
 
         Uses INSERT ... ON CONFLICT DO NOTHING to ensure only one caller

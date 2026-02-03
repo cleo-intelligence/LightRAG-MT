@@ -21,7 +21,10 @@ class TestEntityResolver:
         assert resolver._compute_similarity("Apple Inc", "Apple Inc.") > 0.85
         assert resolver._compute_similarity("Apple Inc", "APPLE INC") > 0.85
         # Token set ratio: Microsoft Corp vs Microsoft Corporation is ~0.80
-        assert resolver._compute_similarity("Microsoft Corporation", "Microsoft Corp.") > 0.75
+        assert (
+            resolver._compute_similarity("Microsoft Corporation", "Microsoft Corp.")
+            > 0.75
+        )
 
         # These should not be considered similar (low similarity)
         assert resolver._compute_similarity("Apple Inc", "Google Inc") < 0.85
@@ -34,8 +37,12 @@ class TestEntityResolver:
         resolver = EntityResolver(similarity_threshold=0.85)
 
         all_nodes = {
-            "Apple Inc": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
-            "Apple Inc.": [{"entity_type": "ORGANIZATION", "description": "Makes iPhones"}],
+            "Apple Inc": [
+                {"entity_type": "ORGANIZATION", "description": "Tech company"}
+            ],
+            "Apple Inc.": [
+                {"entity_type": "ORGANIZATION", "description": "Makes iPhones"}
+            ],
             "Google": [{"entity_type": "ORGANIZATION", "description": "Search engine"}],
         }
 
@@ -54,8 +61,12 @@ class TestEntityResolver:
         resolver = EntityResolver(similarity_threshold=0.95)
 
         all_nodes = {
-            "Apple Inc": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
-            "Apple": [{"entity_type": "ORGANIZATION", "description": "Based in Cupertino"}],
+            "Apple Inc": [
+                {"entity_type": "ORGANIZATION", "description": "Tech company"}
+            ],
+            "Apple": [
+                {"entity_type": "ORGANIZATION", "description": "Based in Cupertino"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -71,9 +82,13 @@ class TestEntityResolver:
         resolver = EntityResolver(similarity_threshold=0.75)
 
         all_nodes = {
-            "Apple Inc": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
+            "Apple Inc": [
+                {"entity_type": "ORGANIZATION", "description": "Tech company"}
+            ],
             "Apple": [{"entity_type": "ORGANIZATION", "description": "Makes iPhones"}],
-            "Apple Incorporated": [{"entity_type": "ORGANIZATION", "description": "Full name"}],
+            "Apple Incorporated": [
+                {"entity_type": "ORGANIZATION", "description": "Full name"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -90,9 +105,15 @@ class TestEntityResolver:
         resolver = EntityResolver(similarity_threshold=0.85)
 
         all_nodes = {
-            "Apple Inc": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
-            "APPLE INC": [{"entity_type": "ORGANIZATION", "description": "Makes iPhones"}],
-            "apple inc": [{"entity_type": "ORGANIZATION", "description": "Cupertino based"}],
+            "Apple Inc": [
+                {"entity_type": "ORGANIZATION", "description": "Tech company"}
+            ],
+            "APPLE INC": [
+                {"entity_type": "ORGANIZATION", "description": "Makes iPhones"}
+            ],
+            "apple inc": [
+                {"entity_type": "ORGANIZATION", "description": "Cupertino based"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -107,7 +128,9 @@ class TestEntityResolver:
         resolver = EntityResolver(similarity_threshold=0.85, min_name_length=3)
 
         all_nodes = {
-            "AI": [{"entity_type": "CONCEPT", "description": "Artificial Intelligence"}],
+            "AI": [
+                {"entity_type": "CONCEPT", "description": "Artificial Intelligence"}
+            ],
             "AI Systems": [{"entity_type": "CONCEPT", "description": "AI technology"}],
             "ML": [{"entity_type": "CONCEPT", "description": "Machine Learning"}],
         }
@@ -130,7 +153,9 @@ class TestEntityResolver:
         all_nodes = {
             "US": [{"entity_type": "LOCATION", "description": "Country"}],
             "United States": [{"entity_type": "LOCATION", "description": "America"}],
-            "United States of America": [{"entity_type": "LOCATION", "description": "USA full name"}],
+            "United States of America": [
+                {"entity_type": "LOCATION", "description": "USA full name"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -148,8 +173,12 @@ class TestEntityResolver:
 
         all_nodes = {
             "Apple": [{"entity_type": "ORGANIZATION", "description": "Short name"}],
-            "Apple Inc": [{"entity_type": "ORGANIZATION", "description": "Medium name"}],
-            "Apple Inc.": [{"entity_type": "ORGANIZATION", "description": "With period"}],
+            "Apple Inc": [
+                {"entity_type": "ORGANIZATION", "description": "Medium name"}
+            ],
+            "Apple Inc.": [
+                {"entity_type": "ORGANIZATION", "description": "With period"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -186,26 +215,30 @@ class TestEntityResolver:
         """Test that only entities of the same type are merged."""
         resolver = EntityResolver(similarity_threshold=0.85)
 
+        # Note: dict keys must be unique, so we use distinct names
         all_nodes = {
-            "Apple": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
-            "Apple": [{"entity_type": "FRUIT", "description": "A fruit"}],  # Different type
-            "Apple Inc": [{"entity_type": "ORGANIZATION", "description": "Full name"}],
-        }
-
-        # Note: dict keys must be unique, so let's structure this differently
-        all_nodes = {
-            "Apple Corp": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
+            "Apple Corp": [
+                {"entity_type": "ORGANIZATION", "description": "Tech company"}
+            ],
             "Apple Fruit": [{"entity_type": "FRUIT", "description": "A fruit"}],
-            "Apple Corp.": [{"entity_type": "ORGANIZATION", "description": "Full name"}],
+            "Apple Corp.": [
+                {"entity_type": "ORGANIZATION", "description": "Full name"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
 
         # ORGANIZATION entities should merge, FRUIT should stay separate
-        org_count = sum(1 for records in result.values()
-                       if records and records[0].get("entity_type") == "ORGANIZATION")
-        fruit_count = sum(1 for records in result.values()
-                         if records and records[0].get("entity_type") == "FRUIT")
+        org_count = sum(
+            1
+            for records in result.values()
+            if records and records[0].get("entity_type") == "ORGANIZATION"
+        )
+        fruit_count = sum(
+            1
+            for records in result.values()
+            if records and records[0].get("entity_type") == "FRUIT"
+        )
 
         assert org_count == 1  # Merged organizations
         assert fruit_count == 1  # Separate fruit
@@ -255,14 +288,24 @@ class TestEntityResolver:
 
         all_nodes = {
             # Apple variations
-            "Apple Inc": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
-            "Apple Inc.": [{"entity_type": "ORGANIZATION", "description": "Makes iPhones"}],
+            "Apple Inc": [
+                {"entity_type": "ORGANIZATION", "description": "Tech company"}
+            ],
+            "Apple Inc.": [
+                {"entity_type": "ORGANIZATION", "description": "Makes iPhones"}
+            ],
             "APPLE": [{"entity_type": "ORGANIZATION", "description": "Cupertino"}],
             # Google variations
-            "Google LLC": [{"entity_type": "ORGANIZATION", "description": "Search engine"}],
-            "Google": [{"entity_type": "ORGANIZATION", "description": "Alphabet subsidiary"}],
+            "Google LLC": [
+                {"entity_type": "ORGANIZATION", "description": "Search engine"}
+            ],
+            "Google": [
+                {"entity_type": "ORGANIZATION", "description": "Alphabet subsidiary"}
+            ],
             # Standalone
-            "Microsoft": [{"entity_type": "ORGANIZATION", "description": "Windows maker"}],
+            "Microsoft": [
+                {"entity_type": "ORGANIZATION", "description": "Windows maker"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -309,7 +352,9 @@ class TestEntityResolverConfiguration:
 
         # Higher threshold (0.92) to avoid false positives like "J. Bondoux" vs "Sylvie Bondoux"
         assert resolver.similarity_threshold == 0.92
-        assert resolver.min_name_length == 2  # Changed from 3 to allow more entity matching
+        assert (
+            resolver.min_name_length == 2
+        )  # Changed from 3 to allow more entity matching
 
     def test_custom_threshold(self):
         """Test custom threshold configuration."""
@@ -397,17 +442,27 @@ class TestNormalization:
         assert resolver._normalize_name("2 CB SAS") == "2cb"
         assert resolver._normalize_name("3 AB test") == "3ab test"
         # French articles should NOT be coalesced
-        assert resolver._normalize_name("2 le chat") == "2 chat"  # "le" removed as article
-        assert resolver._normalize_name("2 la maison") == "2 maison"  # "la" removed as article
+        assert (
+            resolver._normalize_name("2 le chat") == "2 chat"
+        )  # "le" removed as article
+        assert (
+            resolver._normalize_name("2 la maison") == "2 maison"
+        )  # "la" removed as article
 
     def test_normalize_combined(self):
         """Test combination of all normalization rules."""
         resolver = EntityResolver()
 
         # Complex case: accents + legal form + acronym
-        assert resolver._normalize_name("2 C B SAS Ingénierie, Études Techniques") == "2cb ingenierie etudes techniques"
+        assert (
+            resolver._normalize_name("2 C B SAS Ingénierie, Études Techniques")
+            == "2cb ingenierie etudes techniques"
+        )
         # Legal form in middle
-        assert resolver._normalize_name("Société Financière de Rozier SAS") == "financiere rozier"
+        assert (
+            resolver._normalize_name("Société Financière de Rozier SAS")
+            == "financiere rozier"
+        )
 
     def test_similarity_with_punctuation(self):
         """Test similarity handles punctuation differences."""
@@ -430,7 +485,9 @@ class TestFrenchEntityResolution:
             "SAS SFJB": [{"entity_type": "ORGANIZATION", "description": "Version 1"}],
             "SFJB SAS": [{"entity_type": "ORGANIZATION", "description": "Version 2"}],
             "SFJB": [{"entity_type": "ORGANIZATION", "description": "Version 3"}],
-            "Société SFJB": [{"entity_type": "ORGANIZATION", "description": "Version 4"}],
+            "Société SFJB": [
+                {"entity_type": "ORGANIZATION", "description": "Version 4"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -448,7 +505,9 @@ class TestFrenchEntityResolution:
 
         all_nodes = {
             "2CB SAS": [{"entity_type": "ORGANIZATION", "description": "Normal"}],
-            "2 C B SAS": [{"entity_type": "ORGANIZATION", "description": "With full spaces"}],
+            "2 C B SAS": [
+                {"entity_type": "ORGANIZATION", "description": "With full spaces"}
+            ],
             "2 CB": [{"entity_type": "ORGANIZATION", "description": "Partial acronym"}],
             "SAS 2CB": [{"entity_type": "ORGANIZATION", "description": "Reversed"}],
         }
@@ -467,7 +526,9 @@ class TestFrenchEntityResolution:
             "THALIE": [{"entity_type": "ORGANIZATION", "description": "Uppercase"}],
             "Thalie": [{"entity_type": "ORGANIZATION", "description": "Titlecase"}],
             "SAS THALIE": [{"entity_type": "ORGANIZATION", "description": "With SAS"}],
-            "Société THALIE": [{"entity_type": "ORGANIZATION", "description": "With Société"}],
+            "Société THALIE": [
+                {"entity_type": "ORGANIZATION", "description": "With Société"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -481,9 +542,15 @@ class TestFrenchEntityResolution:
         resolver = EntityResolver(similarity_threshold=0.85)
 
         all_nodes = {
-            "Financière de Rozier": [{"entity_type": "ORGANIZATION", "description": "With accents"}],
-            "Financiere de Rozier": [{"entity_type": "ORGANIZATION", "description": "Without accents"}],
-            "SAS Financière de Rozier": [{"entity_type": "ORGANIZATION", "description": "With SAS"}],
+            "Financière de Rozier": [
+                {"entity_type": "ORGANIZATION", "description": "With accents"}
+            ],
+            "Financiere de Rozier": [
+                {"entity_type": "ORGANIZATION", "description": "Without accents"}
+            ],
+            "SAS Financière de Rozier": [
+                {"entity_type": "ORGANIZATION", "description": "With SAS"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -500,7 +567,9 @@ class TestFrenchEntityResolution:
 
         all_nodes = {
             "SFJB": [{"entity_type": "ORGANIZATION", "description": "Short"}],
-            "SAS SFJB": [{"entity_type": "ORGANIZATION", "description": "With legal form"}],
+            "SAS SFJB": [
+                {"entity_type": "ORGANIZATION", "description": "With legal form"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -566,7 +635,9 @@ class TestPreferShorterCanonicalName:
 
         all_nodes = {
             "SFJB": [{"entity_type": "ORGANIZATION", "description": "Short"}],
-            "SAS SFJB": [{"entity_type": "ORGANIZATION", "description": "With legal form"}],
+            "SAS SFJB": [
+                {"entity_type": "ORGANIZATION", "description": "With legal form"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -587,7 +658,9 @@ class TestPreferShorterCanonicalName:
 
         all_nodes = {
             "SFJB": [{"entity_type": "ORGANIZATION", "description": "Short"}],
-            "SAS SFJB": [{"entity_type": "ORGANIZATION", "description": "With legal form"}],
+            "SAS SFJB": [
+                {"entity_type": "ORGANIZATION", "description": "With legal form"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -609,7 +682,9 @@ class TestPreferShorterCanonicalName:
         all_nodes = {
             "SFJB": [{"entity_type": "ORGANIZATION", "description": "Shortest"}],
             "SFJB SAS": [{"entity_type": "ORGANIZATION", "description": "Medium"}],
-            "Société SFJB": [{"entity_type": "ORGANIZATION", "description": "With article"}],
+            "Société SFJB": [
+                {"entity_type": "ORGANIZATION", "description": "With article"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -649,8 +724,12 @@ class TestPreferShorterCanonicalName:
 
         all_nodes = {
             "Acme": [{"entity_type": "ORGANIZATION", "description": "Short"}],
-            "Acme SAS": [{"entity_type": "ORGANIZATION", "description": "With legal form"}],
-            "Société Acme SARL": [{"entity_type": "ORGANIZATION", "description": "Full"}],
+            "Acme SAS": [
+                {"entity_type": "ORGANIZATION", "description": "With legal form"}
+            ],
+            "Société Acme SARL": [
+                {"entity_type": "ORGANIZATION", "description": "Full"}
+            ],
         }
 
         result = await resolver.consolidate_entities(all_nodes)
@@ -673,15 +752,19 @@ class TestCrossDocumentResolution:
 
         # Mock knowledge graph with existing entities
         mock_graph = MagicMock()
-        mock_graph.get_all_nodes = AsyncMock(return_value=[
-            {"entity_id": "Acme Ingenierie", "entity_type": "ORGANIZATION"},
-            {"entity_id": "Tesla Motors", "entity_type": "ORGANIZATION"},
-        ])
+        mock_graph.get_all_nodes = AsyncMock(
+            return_value=[
+                {"entity_id": "Acme Ingenierie", "entity_type": "ORGANIZATION"},
+                {"entity_id": "Tesla Motors", "entity_type": "ORGANIZATION"},
+            ]
+        )
 
         # New entities from a document
         all_nodes = {
             "Acme": [{"entity_type": "ORGANIZATION", "description": "Short variant"}],
-            "SpaceX": [{"entity_type": "ORGANIZATION", "description": "Different company"}],
+            "SpaceX": [
+                {"entity_type": "ORGANIZATION", "description": "Different company"}
+            ],
         }
 
         global_config = {
@@ -709,9 +792,11 @@ class TestCrossDocumentResolution:
         from unittest.mock import AsyncMock, MagicMock
 
         mock_graph = MagicMock()
-        mock_graph.get_all_nodes = AsyncMock(return_value=[
-            {"entity_id": "Apple", "entity_type": "ORGANIZATION"},
-        ])
+        mock_graph.get_all_nodes = AsyncMock(
+            return_value=[
+                {"entity_id": "Apple", "entity_type": "ORGANIZATION"},
+            ]
+        )
 
         # New entity with DIFFERENT type
         all_nodes = {
@@ -787,13 +872,17 @@ class TestCrossDocumentResolution:
         from unittest.mock import AsyncMock, MagicMock
 
         mock_graph = MagicMock()
-        mock_graph.get_all_nodes = AsyncMock(return_value=[
-            {"entity_id": "SFJB", "entity_type": "ORGANIZATION"},
-        ])
+        mock_graph.get_all_nodes = AsyncMock(
+            return_value=[
+                {"entity_id": "SFJB", "entity_type": "ORGANIZATION"},
+            ]
+        )
 
         # New entity with legal form and spacing variations
         all_nodes = {
-            "S F J B SAS": [{"entity_type": "ORGANIZATION", "description": "With spaces and SAS"}],
+            "S F J B SAS": [
+                {"entity_type": "ORGANIZATION", "description": "With spaces and SAS"}
+            ],
         }
 
         global_config = {
@@ -821,14 +910,34 @@ class TestPostProcessingConsolidation:
 
         # Mock graph with duplicate entities (race condition result)
         mock_graph = MagicMock()
-        mock_graph.get_all_nodes = AsyncMock(return_value=[
-            {"entity_id": "THALIE", "entity_type": "ORGANIZATION", "description": "Version 1"},
-            {"entity_id": "Thalie", "entity_type": "ORGANIZATION", "description": "Version 2"},
-        ])
-        mock_graph.get_node = AsyncMock(side_effect=lambda name: {
-            "THALIE": {"entity_id": "THALIE", "entity_type": "ORGANIZATION", "description": "Version 1"},
-            "Thalie": {"entity_id": "Thalie", "entity_type": "ORGANIZATION", "description": "Version 2"},
-        }.get(name))
+        mock_graph.get_all_nodes = AsyncMock(
+            return_value=[
+                {
+                    "entity_id": "THALIE",
+                    "entity_type": "ORGANIZATION",
+                    "description": "Version 1",
+                },
+                {
+                    "entity_id": "Thalie",
+                    "entity_type": "ORGANIZATION",
+                    "description": "Version 2",
+                },
+            ]
+        )
+        mock_graph.get_node = AsyncMock(
+            side_effect=lambda name: {
+                "THALIE": {
+                    "entity_id": "THALIE",
+                    "entity_type": "ORGANIZATION",
+                    "description": "Version 1",
+                },
+                "Thalie": {
+                    "entity_id": "Thalie",
+                    "entity_type": "ORGANIZATION",
+                    "description": "Version 2",
+                },
+            }.get(name)
+        )
         mock_graph.get_node_edges = AsyncMock(return_value=[])
         mock_graph.upsert_node = AsyncMock()
         mock_graph.delete_node = AsyncMock()
@@ -861,11 +970,25 @@ class TestPostProcessingConsolidation:
         from unittest.mock import AsyncMock, MagicMock
 
         mock_graph = MagicMock()
-        mock_graph.get_all_nodes = AsyncMock(return_value=[
-            {"entity_id": "Vincent BONDOUX", "entity_type": "PERSON", "description": "Person 1"},
-            {"entity_id": "Vincent Bondoux", "entity_type": "PERSON", "description": "Person 2"},
-            {"entity_id": "VINCENT BONDOUX", "entity_type": "PERSON", "description": "Person 3"},
-        ])
+        mock_graph.get_all_nodes = AsyncMock(
+            return_value=[
+                {
+                    "entity_id": "Vincent BONDOUX",
+                    "entity_type": "PERSON",
+                    "description": "Person 1",
+                },
+                {
+                    "entity_id": "Vincent Bondoux",
+                    "entity_type": "PERSON",
+                    "description": "Person 2",
+                },
+                {
+                    "entity_id": "VINCENT BONDOUX",
+                    "entity_type": "PERSON",
+                    "description": "Person 3",
+                },
+            ]
+        )
         mock_graph.get_node = AsyncMock(return_value={"description": "Test"})
         mock_graph.get_node_edges = AsyncMock(return_value=[])
         mock_graph.upsert_node = AsyncMock()
@@ -921,9 +1044,11 @@ class TestPostProcessingConsolidation:
         from unittest.mock import AsyncMock, MagicMock
 
         mock_graph = MagicMock()
-        mock_graph.get_all_nodes = AsyncMock(return_value=[
-            {"entity_id": "SingleEntity", "entity_type": "ORGANIZATION"},
-        ])
+        mock_graph.get_all_nodes = AsyncMock(
+            return_value=[
+                {"entity_id": "SingleEntity", "entity_type": "ORGANIZATION"},
+            ]
+        )
 
         mock_entity_vdb = MagicMock()
         mock_rel_vdb = MagicMock()
@@ -946,10 +1071,16 @@ class TestPostProcessingConsolidation:
         from unittest.mock import AsyncMock, MagicMock
 
         mock_graph = MagicMock()
-        mock_graph.get_all_nodes = AsyncMock(return_value=[
-            {"entity_id": "Apple", "entity_type": "ORGANIZATION", "description": "Company"},
-            {"entity_id": "Apple", "entity_type": "FRUIT", "description": "Fruit"},
-        ])
+        mock_graph.get_all_nodes = AsyncMock(
+            return_value=[
+                {
+                    "entity_id": "Apple",
+                    "entity_type": "ORGANIZATION",
+                    "description": "Company",
+                },
+                {"entity_id": "Apple", "entity_type": "FRUIT", "description": "Fruit"},
+            ]
+        )
 
         mock_entity_vdb = MagicMock()
         mock_rel_vdb = MagicMock()
@@ -974,15 +1105,15 @@ class TestPostProcessingConsolidation:
         from unittest.mock import AsyncMock, MagicMock
 
         mock_graph = MagicMock()
-        mock_graph.get_all_nodes = AsyncMock(return_value=[
-            {"entity_id": "SFJB", "entity_type": "ORGANIZATION"},
-            {"entity_id": "S F J B", "entity_type": "ORGANIZATION"},
-        ])
+        mock_graph.get_all_nodes = AsyncMock(
+            return_value=[
+                {"entity_id": "SFJB", "entity_type": "ORGANIZATION"},
+                {"entity_id": "S F J B", "entity_type": "ORGANIZATION"},
+            ]
+        )
         mock_graph.get_node = AsyncMock(return_value={"description": "Test"})
         # get_node_edges returns list[tuple[str, str]] - (source_id, target_id)
-        mock_graph.get_node_edges = AsyncMock(return_value=[
-            ("S F J B", "OtherEntity")
-        ])
+        mock_graph.get_node_edges = AsyncMock(return_value=[("S F J B", "OtherEntity")])
         # get_edge returns the edge data as a dictionary
         mock_graph.get_edge = AsyncMock(return_value={"relation": "WORKS_WITH"})
         mock_graph.upsert_node = AsyncMock()
@@ -1001,7 +1132,9 @@ class TestPostProcessingConsolidation:
             "entity_min_name_length": 2,  # Allow short names
         }
 
-        await consolidate_graph_entities(mock_graph, mock_entity_vdb, mock_rel_vdb, global_config)
+        await consolidate_graph_entities(
+            mock_graph, mock_entity_vdb, mock_rel_vdb, global_config
+        )
 
         # Should have called upsert_edge to reconnect
         assert mock_graph.upsert_edge.called
@@ -1039,8 +1172,7 @@ class TestFalsePositivePrevention:
 
         # "Senozan" should NOT match the full address
         score = compute_entity_similarity(
-            "Senozan",
-            "617 Impasse du Pré denfer, 71260 Senozan"
+            "Senozan", "617 Impasse du Pré denfer, 71260 Senozan"
         )
         assert score < 0.5, f"'Senozan' should not match address, got score {score}"
 
@@ -1051,21 +1183,19 @@ class TestFalsePositivePrevention:
         # "Impasse du Pré dEnfer" should NOT match the full address at default threshold
         # Score will be > 0 due to shared tokens, but should be below 0.85 threshold
         score = compute_entity_similarity(
-            "Impasse du Pré dEnfer",
-            "617 Impasse du Pré denfer, 71260 Senozan"
+            "Impasse du Pré dEnfer", "617 Impasse du Pré denfer, 71260 Senozan"
         )
         # Default threshold is 0.85-0.92, so score below 0.85 means no merge
-        assert score < 0.85, f"Street name should not match full address at default threshold, got score {score}"
+        assert score < 0.85, (
+            f"Street name should not match full address at default threshold, got score {score}"
+        )
 
     def test_different_dates_not_merged(self):
         """Test that different dates are not merged."""
         from lightrag.entity_resolution import compute_entity_similarity
 
         # Different dates should NOT match
-        score = compute_entity_similarity(
-            "2024-12-01T00:00:00",
-            "2024-12-15T00:00:00"
-        )
+        score = compute_entity_similarity("2024-12-01T00:00:00", "2024-12-15T00:00:00")
         assert score < 0.85, f"Different dates should not match, got score {score}"
 
     def test_email_variations_not_merged(self):
@@ -1073,9 +1203,8 @@ class TestFalsePositivePrevention:
         from lightrag.entity_resolution import compute_entity_similarity
 
         # These are different entities - different context qualifiers
-        score = compute_entity_similarity(
-            "Clément Thomas Email",
-            "Clément Thomas Email Secondaire"
+        _score = compute_entity_similarity(
+            "Clément Thomas Email", "Clément Thomas Email Secondaire"
         )
         # This is tricky - they share most tokens but "Secondaire" is important
         # With prefix matching, "Clément Thomas Email" is a prefix of the other
@@ -1090,7 +1219,9 @@ class TestFalsePositivePrevention:
 
         # "Acme" should match "Acme Ingenierie" (valid prefix)
         score = compute_entity_similarity("Acme", "Acme Ingenierie")
-        assert score >= 0.85, f"'Acme' should match 'Acme Ingenierie', got score {score}"
+        assert score >= 0.85, (
+            f"'Acme' should match 'Acme Ingenierie', got score {score}"
+        )
 
         # "Apple" should match "Apple Inc" (valid prefix)
         score = compute_entity_similarity("Apple", "Apple Inc")
@@ -1102,7 +1233,9 @@ class TestFalsePositivePrevention:
 
         # Different invoice numbers should NOT match
         score = compute_entity_similarity("Facture 24012823", "Facture 24012815")
-        assert score == 0.0, f"Different invoice numbers should not match, got score {score}"
+        assert score == 0.0, (
+            f"Different invoice numbers should not match, got score {score}"
+        )
 
         # Different years should NOT match
         score = compute_entity_similarity("Report 2023", "Report 2024")
@@ -1122,7 +1255,9 @@ class TestFalsePositivePrevention:
 
         # Same company with punctuation variations
         score = compute_entity_similarity("Apple Inc", "Apple Inc.")
-        assert score >= 0.92, f"'Apple Inc' should match 'Apple Inc.', got score {score}"
+        assert score >= 0.92, (
+            f"'Apple Inc' should match 'Apple Inc.', got score {score}"
+        )
 
         # Same company with legal form variations
         score = compute_entity_similarity("Thalie SAS", "Thalie")

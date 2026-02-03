@@ -118,8 +118,12 @@ def compare_snapshots(output_dir: Path, workspace: str):
     after_relations = after["stats"]["total_relations"]
     diff_relations = after_relations - before_relations
 
-    print(f"{'Entités':<30} {before_entities:>10} {after_entities:>10} {diff_entities:>+10}")
-    print(f"{'Relations':<30} {before_relations:>10} {after_relations:>10} {diff_relations:>+10}")
+    print(
+        f"{'Entités':<30} {before_entities:>10} {after_entities:>10} {diff_entities:>+10}"
+    )
+    print(
+        f"{'Relations':<30} {before_relations:>10} {after_relations:>10} {diff_relations:>+10}"
+    )
 
     # Réduction attendue avec Entity Resolution
     if diff_entities < 0:
@@ -149,7 +153,9 @@ def compare_snapshots(output_dir: Path, workspace: str):
     # Identifier les entités fusionnées
     print("\n--- ANALYSE DES FUSIONS ---")
 
-    before_names = {n.get("entity_name", n.get("id", "")): n for n in before["entities"]}
+    before_names = {
+        n.get("entity_name", n.get("id", "")): n for n in before["entities"]
+    }
     after_names = {n.get("entity_name", n.get("id", "")): n for n in after["entities"]}
 
     # Entités présentes BEFORE mais pas AFTER (potentiellement fusionnées)

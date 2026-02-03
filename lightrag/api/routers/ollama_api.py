@@ -537,9 +537,7 @@ class OllamaAPI:
                             **rag.llm_model_kwargs,
                         )
                     else:
-                        response = await rag.aquery(
-                            cleaned_query, param=query_param
-                        )
+                        response = await rag.aquery(cleaned_query, param=query_param)
 
                     async def stream_generator():
                         first_chunk_time = None

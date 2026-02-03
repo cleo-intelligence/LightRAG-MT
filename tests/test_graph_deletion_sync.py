@@ -6,11 +6,9 @@ Feature: 002-fix-graph-deletion-sync
 """
 
 import asyncio
-import os
 import tempfile
 from dataclasses import dataclass
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -74,7 +72,7 @@ def get_graph_stats(graph_storage) -> dict:
     Returns:
         Dict with 'nodes' and 'edges' counts
     """
-    if hasattr(graph_storage, '_graph') and graph_storage._graph is not None:
+    if hasattr(graph_storage, "_graph") and graph_storage._graph is not None:
         return {
             "nodes": graph_storage._graph.number_of_nodes(),
             "edges": graph_storage._graph.number_of_edges(),
@@ -103,6 +101,7 @@ class MockNetworkXStorage:
 
     def __post_init__(self):
         import networkx as nx
+
         self._graph = nx.Graph()
         self._reload_count = 0
         self._deletion_in_progress = False
@@ -180,16 +179,13 @@ async def populated_graph_storage(mock_graph_storage):
     # Add some test nodes
     for i in range(10):
         await mock_graph_storage.upsert_node(
-            f"entity_{i}",
-            {"entity_type": "test", "description": f"Test entity {i}"}
+            f"entity_{i}", {"entity_type": "test", "description": f"Test entity {i}"}
         )
 
     # Add some test edges
     for i in range(5):
         await mock_graph_storage.upsert_edge(
-            f"entity_{i}",
-            f"entity_{i+5}",
-            {"description": f"Test relation {i}"}
+            f"entity_{i}", f"entity_{i + 5}", {"description": f"Test relation {i}"}
         )
 
     return mock_graph_storage
@@ -210,9 +206,9 @@ async def test_cache_deleted_before_rebuild(mock_graph_storage):
     """
     # Setup: Create mock cache and chunk storage
     mock_llm_cache = AsyncMock()
-    mock_text_chunks = AsyncMock()
+    _mock_text_chunks = AsyncMock()  # Reserved for future use
 
-    deleted_chunk_ids = ["chunk_1", "chunk_2", "chunk_3"]
+    _deleted_chunk_ids = ["chunk_1", "chunk_2", "chunk_3"]  # Reserved for future use
     cache_ids_to_delete = ["cache_1", "cache_2", "cache_3"]
 
     # Track order of operations
@@ -352,10 +348,12 @@ async def test_graph_node_count_decreases_after_deletion(populated_graph_storage
     final_count = await count_graph_nodes(storage)
     expected_count = initial_count - len(nodes_to_delete)
 
-    assert final_count == expected_count, \
+    assert final_count == expected_count, (
         f"Expected {expected_count} nodes after deletion, got {final_count}"
-    assert final_count < initial_count, \
+    )
+    assert final_count < initial_count, (
         f"Node count did not decrease: {initial_count} -> {final_count}"
+    )
 
 
 @pytest.mark.asyncio
@@ -370,22 +368,20 @@ async def test_shared_entities_preserved_after_deletion(mock_graph_storage):
 
     # Setup: Create entities with different source references
     # Entity exclusively from doc_1 (should be deleted)
-    await storage.upsert_node("exclusive_entity", {
-        "source_id": "chunk_doc1_1<|>chunk_doc1_2",
-        "type": "exclusive"
-    })
+    await storage.upsert_node(
+        "exclusive_entity",
+        {"source_id": "chunk_doc1_1<|>chunk_doc1_2", "type": "exclusive"},
+    )
 
     # Entity shared between doc_1 and doc_2 (should be preserved)
-    await storage.upsert_node("shared_entity", {
-        "source_id": "chunk_doc1_1<|>chunk_doc2_1",
-        "type": "shared"
-    })
+    await storage.upsert_node(
+        "shared_entity", {"source_id": "chunk_doc1_1<|>chunk_doc2_1", "type": "shared"}
+    )
 
     # Entity exclusively from doc_2 (should be preserved)
-    await storage.upsert_node("other_entity", {
-        "source_id": "chunk_doc2_1<|>chunk_doc2_2",
-        "type": "other"
-    })
+    await storage.upsert_node(
+        "other_entity", {"source_id": "chunk_doc2_1<|>chunk_doc2_2", "type": "other"}
+    )
 
     initial_count = await count_graph_nodes(storage)
     assert initial_count == 3
@@ -424,8 +420,9 @@ async def test_graphs_endpoint_reflects_deletion(populated_graph_storage):
     final_stats = get_graph_stats(storage)
 
     # Verify stats reflect deletion
-    assert final_stats["nodes"] < initial_stats["nodes"], \
+    assert final_stats["nodes"] < initial_stats["nodes"], (
         f"Node count should decrease: {initial_stats['nodes']} -> {final_stats['nodes']}"
+    )
 
 
 # ============================================================================

@@ -23,7 +23,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from lightrag.constants import (
-    DEFAULT_ENABLE_ENTITY_RESOLUTION,
     DEFAULT_ENTITY_SIMILARITY_THRESHOLD,
     DEFAULT_ENTITY_MIN_NAME_LENGTH,
     DEFAULT_PREFER_SHORTER_CANONICAL_NAME,
@@ -35,17 +34,53 @@ logger = logging.getLogger("lightrag.entity_resolution")
 
 # French legal forms to remove during normalization (case-insensitive)
 FRENCH_LEGAL_FORMS = {
-    "sas", "sarl", "sa", "sasu", "eurl", "sci", "snc", "sca", "scop",
-    "saem", "sem", "eirl", "ei", "gie", "gmbh", "ag", "ltd", "llc",
-    "inc", "corp", "corporation", "incorporated", "limited",
+    "sas",
+    "sarl",
+    "sa",
+    "sasu",
+    "eurl",
+    "sci",
+    "snc",
+    "sca",
+    "scop",
+    "saem",
+    "sem",
+    "eirl",
+    "ei",
+    "gie",
+    "gmbh",
+    "ag",
+    "ltd",
+    "llc",
+    "inc",
+    "corp",
+    "corporation",
+    "incorporated",
+    "limited",
 }
 
 # French articles and common prefixes to remove
 # Note: "compagnie" is NOT included as it's often the main name
 FRENCH_ARTICLES = {
-    "la", "le", "les", "l", "un", "une", "des", "du", "de", "d",
-    "société", "societe", "ste", "entreprise", "ets", "etablissements",
-    "groupe", "holding", "cie",
+    "la",
+    "le",
+    "les",
+    "l",
+    "un",
+    "une",
+    "des",
+    "du",
+    "de",
+    "d",
+    "société",
+    "societe",
+    "ste",
+    "entreprise",
+    "ets",
+    "etablissements",
+    "groupe",
+    "holding",
+    "cie",
 }
 
 
@@ -76,19 +111,19 @@ def _coalesce_single_chars(text: str) -> str:
 
     # Pattern 1: single char + (space + single char)+
     # This matches "A B C" but not "AB CD"
-    pattern1 = r'\b([A-Za-z0-9])((?:\s+[A-Za-z0-9])+)\b'
+    pattern1 = r"\b([A-Za-z0-9])((?:\s+[A-Za-z0-9])+)\b"
 
     # Pattern 2: single DIGIT + space + short acronym (2-3 letters)
     # This matches "2 CB", "2 cb" but excludes French articles (la, le, un, du, de, les, des)
     # Uses negative lookahead to avoid breaking article removal
-    pattern2 = r'\b([0-9])\s+(?!la\b|le\b|un\b|du\b|de\b|les\b|des\b)([A-Za-z]{2,3})\b'
+    pattern2 = r"\b([0-9])\s+(?!la\b|le\b|un\b|du\b|de\b|les\b|des\b)([A-Za-z]{2,3})\b"
 
     result = text
     # Keep applying until no more changes (handles overlapping patterns)
     while True:
         new_result = re.sub(pattern1, coalesce_match, result)
         # Also apply pattern 2 for short acronym fragments
-        new_result = re.sub(pattern2, r'\1\2', new_result)
+        new_result = re.sub(pattern2, r"\1\2", new_result)
         if new_result == result:
             break
         result = new_result
@@ -132,7 +167,8 @@ def _normalize_for_matching(name: str) -> str:
 
     # Step 6: Remove legal forms and articles
     filtered_tokens = [
-        token for token in tokens
+        token
+        for token in tokens
         if token not in FRENCH_LEGAL_FORMS and token not in FRENCH_ARTICLES
     ]
 
@@ -209,10 +245,18 @@ def compute_entity_similarity(name1: str, name2: str) -> float:
 
     if len_ratio < 0.4 or len_ratio > 2.5:
         # One is much shorter - check if it's a valid prefix/subset
-        shorter_norm = normalized1 if len(normalized1) < len(normalized2) else normalized2
-        longer_norm = normalized2 if len(normalized1) < len(normalized2) else normalized1
-        shorter_tokens = set(tokens1) if len(normalized1) < len(normalized2) else set(tokens2)
-        longer_tokens = set(tokens2) if len(normalized1) < len(normalized2) else set(tokens1)
+        shorter_norm = (
+            normalized1 if len(normalized1) < len(normalized2) else normalized2
+        )
+        longer_norm = (
+            normalized2 if len(normalized1) < len(normalized2) else normalized1
+        )
+        shorter_tokens = (
+            set(tokens1) if len(normalized1) < len(normalized2) else set(tokens2)
+        )
+        longer_tokens = (
+            set(tokens2) if len(normalized1) < len(normalized2) else set(tokens1)
+        )
 
         # Check if shorter name is a PREFIX of longer name (starts with it)
         # "acme" is prefix of "acme ingenierie" → valid

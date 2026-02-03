@@ -512,9 +512,7 @@ class PostgreSQLDB:
         await self._ensure_pool()
         assert self.pool is not None
         async with self.pool.acquire() as conn:
-            result = await conn.fetchval(
-                "SELECT pg_try_advisory_lock($1)", lock_key
-            )
+            result = await conn.fetchval("SELECT pg_try_advisory_lock($1)", lock_key)
             return bool(result)
 
     async def release_advisory_lock(self, lock_key: int) -> bool:
@@ -529,9 +527,7 @@ class PostgreSQLDB:
         await self._ensure_pool()
         assert self.pool is not None
         async with self.pool.acquire() as conn:
-            result = await conn.fetchval(
-                "SELECT pg_advisory_unlock($1)", lock_key
-            )
+            result = await conn.fetchval("SELECT pg_advisory_unlock($1)", lock_key)
             return bool(result)
 
     async def try_pipeline_lock(self, workspace: str) -> bool:
@@ -551,7 +547,9 @@ class PostgreSQLDB:
         if acquired:
             logger.info(f"[{workspace}] Acquired pipeline lock (key={lock_key})")
         else:
-            logger.debug(f"[{workspace}] Pipeline lock held by another instance (key={lock_key})")
+            logger.debug(
+                f"[{workspace}] Pipeline lock held by another instance (key={lock_key})"
+            )
         return acquired
 
     async def release_pipeline_lock(self, workspace: str) -> bool:
@@ -1536,7 +1534,7 @@ class PostgreSQLDB:
             "VCHORDRQ": f"""
                 CREATE INDEX {{vector_index_name}}
                 ON {{k}} USING vchordrq (content_vector vector_cosine_ops)
-                {f'WITH (options = $${self.vchordrq_build_options}$$)' if self.vchordrq_build_options else ''}
+                {f"WITH (options = $${self.vchordrq_build_options}$$)" if self.vchordrq_build_options else ""}
             """,
         }
 
@@ -1662,6 +1660,7 @@ class PostgreSQLDB:
             sql: The SQL statement to execute with $1, $2, ... placeholders
             records: List of tuples, each tuple contains values for one row
         """
+
         async def _operation(connection: asyncpg.Connection) -> None:
             await connection.executemany(sql, records)
 
@@ -1717,7 +1716,9 @@ class ClientManager:
             ),
             "max_inactive_connection_lifetime": os.environ.get(
                 "POSTGRES_MAX_INACTIVE_CONNECTION_LIFETIME",
-                config.get("postgres", "max_inactive_connection_lifetime", fallback=300.0),
+                config.get(
+                    "postgres", "max_inactive_connection_lifetime", fallback=300.0
+                ),
             ),
             # SSL configuration
             "ssl_mode": os.environ.get(
@@ -2001,10 +2002,12 @@ class PGKVStorage(BaseKVStorage):
         # Diagnostic: check if document exists in other workspaces when not found in full_docs
         if not response and is_namespace(self.namespace, NameSpace.KV_STORE_FULL_DOCS):
             try:
-                check_sql = "SELECT workspace, id FROM LIGHTRAG_DOC_FULL WHERE id=$1 LIMIT 1"
+                check_sql = (
+                    "SELECT workspace, id FROM LIGHTRAG_DOC_FULL WHERE id=$1 LIMIT 1"
+                )
                 check_result = await self.db.query(check_sql, [id], True)
                 if check_result:
-                    actual_workspace = check_result[0].get('workspace', 'unknown')
+                    actual_workspace = check_result[0].get("workspace", "unknown")
                     logger.warning(
                         f"[{self.workspace}] PGKVStorage.get_by_id(full_docs): doc_id={id} "
                         f"NOT found with workspace='{self.workspace}', "
@@ -2203,18 +2206,20 @@ class PGKVStorage(BaseKVStorage):
             # SQL params order: $1=workspace, $2=id, $3=tokens, $4=chunk_order_index,
             # $5=full_doc_id, $6=content, $7=file_path, $8=llm_cache_list, $9=create_time, $10=update_time
             for k, v in data.items():
-                records.append((
-                    self.workspace,
-                    k,
-                    v["tokens"],
-                    v["chunk_order_index"],
-                    v["full_doc_id"],
-                    v["content"],
-                    v["file_path"],
-                    json.dumps(v.get("llm_cache_list", [])),
-                    current_time,
-                    current_time,
-                ))
+                records.append(
+                    (
+                        self.workspace,
+                        k,
+                        v["tokens"],
+                        v["chunk_order_index"],
+                        v["full_doc_id"],
+                        v["content"],
+                        v["file_path"],
+                        json.dumps(v.get("llm_cache_list", [])),
+                        current_time,
+                        current_time,
+                    )
+                )
 
         elif is_namespace(self.namespace, NameSpace.KV_STORE_FULL_DOCS):
             logger.info(
@@ -2227,87 +2232,102 @@ class PGKVStorage(BaseKVStorage):
                     f"[{self.workspace}] PGKVStorage.upsert(full_docs): upserting doc_id={k}, "
                     f"file={v.get('file_path', 'unknown')}"
                 )
-                records.append((
-                    k,
-                    v["content"],
-                    v.get("file_path", ""),  # Map file_path to doc_name
-                    self.workspace,
-                ))
+                records.append(
+                    (
+                        k,
+                        v["content"],
+                        v.get("file_path", ""),  # Map file_path to doc_name
+                        self.workspace,
+                    )
+                )
 
         elif is_namespace(self.namespace, NameSpace.KV_STORE_LLM_RESPONSE_CACHE):
             upsert_sql = SQL_TEMPLATES["upsert_llm_response_cache"]
             # SQL params order: $1=workspace, $2=id, $3=original_prompt, $4=return_value,
             # $5=chunk_id, $6=cache_type, $7=queryparam
             for k, v in data.items():
-                records.append((
-                    self.workspace,
-                    k,  # Use flattened key as id
-                    v["original_prompt"],
-                    v["return"],
-                    v.get("chunk_id"),
-                    v.get("cache_type", "extract"),
-                    json.dumps(v.get("queryparam")) if v.get("queryparam") else None,
-                ))
+                records.append(
+                    (
+                        self.workspace,
+                        k,  # Use flattened key as id
+                        v["original_prompt"],
+                        v["return"],
+                        v.get("chunk_id"),
+                        v.get("cache_type", "extract"),
+                        json.dumps(v.get("queryparam"))
+                        if v.get("queryparam")
+                        else None,
+                    )
+                )
 
         elif is_namespace(self.namespace, NameSpace.KV_STORE_FULL_ENTITIES):
             upsert_sql = SQL_TEMPLATES["upsert_full_entities"]
             # SQL params order: $1=workspace, $2=id, $3=entity_names, $4=count, $5=create_time, $6=update_time
             for k, v in data.items():
                 entity_names = v.get("entity_names", [])
-                records.append((
-                    self.workspace,
-                    k,
-                    json.dumps(entity_names),
-                    v.get("count", len(entity_names)),
-                    current_time,
-                    current_time,
-                ))
+                records.append(
+                    (
+                        self.workspace,
+                        k,
+                        json.dumps(entity_names),
+                        v.get("count", len(entity_names)),
+                        current_time,
+                        current_time,
+                    )
+                )
 
         elif is_namespace(self.namespace, NameSpace.KV_STORE_FULL_RELATIONS):
             upsert_sql = SQL_TEMPLATES["upsert_full_relations"]
             # SQL params order: $1=workspace, $2=id, $3=relation_pairs, $4=count, $5=create_time, $6=update_time
             for k, v in data.items():
                 relation_pairs = v.get("relation_pairs", [])
-                records.append((
-                    self.workspace,
-                    k,
-                    json.dumps(relation_pairs),
-                    v.get("count", len(relation_pairs)),
-                    current_time,
-                    current_time,
-                ))
+                records.append(
+                    (
+                        self.workspace,
+                        k,
+                        json.dumps(relation_pairs),
+                        v.get("count", len(relation_pairs)),
+                        current_time,
+                        current_time,
+                    )
+                )
 
         elif is_namespace(self.namespace, NameSpace.KV_STORE_ENTITY_CHUNKS):
             upsert_sql = SQL_TEMPLATES["upsert_entity_chunks"]
             # SQL params order: $1=workspace, $2=id, $3=chunk_ids, $4=count, $5=create_time, $6=update_time
             for k, v in data.items():
                 chunk_ids = v.get("chunk_ids", [])
-                records.append((
-                    self.workspace,
-                    k,
-                    json.dumps(chunk_ids),
-                    v.get("count", len(chunk_ids)),
-                    current_time,
-                    current_time,
-                ))
+                records.append(
+                    (
+                        self.workspace,
+                        k,
+                        json.dumps(chunk_ids),
+                        v.get("count", len(chunk_ids)),
+                        current_time,
+                        current_time,
+                    )
+                )
 
         elif is_namespace(self.namespace, NameSpace.KV_STORE_RELATION_CHUNKS):
             upsert_sql = SQL_TEMPLATES["upsert_relation_chunks"]
             # SQL params order: $1=workspace, $2=id, $3=chunk_ids, $4=count, $5=create_time, $6=update_time
             for k, v in data.items():
                 chunk_ids = v.get("chunk_ids", [])
-                records.append((
-                    self.workspace,
-                    k,
-                    json.dumps(chunk_ids),
-                    v.get("count", len(chunk_ids)),
-                    current_time,
-                    current_time,
-                ))
+                records.append(
+                    (
+                        self.workspace,
+                        k,
+                        json.dumps(chunk_ids),
+                        v.get("count", len(chunk_ids)),
+                        current_time,
+                        current_time,
+                    )
+                )
 
         # Execute batch insert using executemany with retry for deadlocks
         if records and upsert_sql:
             import time as time_module
+
             upsert_start = time_module.perf_counter()
             await self.db.executemany(upsert_sql, records)
             upsert_time = (time_module.perf_counter() - upsert_start) * 1000
@@ -2524,11 +2544,14 @@ class PGVectorStorage(BaseVectorStorage):
         ]
 
         import time as time_module
+
         embed_start = time_module.perf_counter()
         embedding_tasks = [self.embedding_func(batch) for batch in batches]
         embeddings_list = await asyncio.gather(*embedding_tasks)
         embed_time = (time_module.perf_counter() - embed_start) * 1000
-        logger.info(f"[PERF] VDB upsert: embedding={embed_time:.1f}ms ({len(contents)} items in {len(batches)} batches)")
+        logger.info(
+            f"[PERF] VDB upsert: embedding={embed_time:.1f}ms ({len(contents)} items in {len(batches)} batches)"
+        )
 
         embeddings = np.concatenate(embeddings_list)
         for i, d in enumerate(list_data):
@@ -2541,18 +2564,20 @@ class PGVectorStorage(BaseVectorStorage):
         if is_namespace(self.namespace, NameSpace.VECTOR_STORE_CHUNKS):
             upsert_sql = SQL_TEMPLATES["upsert_chunk"]
             for item in list_data:
-                records.append((
-                    self.workspace,
-                    item["__id__"],
-                    item["tokens"],
-                    item["chunk_order_index"],
-                    item["full_doc_id"],
-                    item["content"],
-                    json.dumps(item["__vector__"].tolist()),
-                    item["file_path"],
-                    current_time,
-                    current_time,
-                ))
+                records.append(
+                    (
+                        self.workspace,
+                        item["__id__"],
+                        item["tokens"],
+                        item["chunk_order_index"],
+                        item["full_doc_id"],
+                        item["content"],
+                        json.dumps(item["__vector__"].tolist()),
+                        item["file_path"],
+                        current_time,
+                        current_time,
+                    )
+                )
         elif is_namespace(self.namespace, NameSpace.VECTOR_STORE_ENTITIES):
             upsert_sql = SQL_TEMPLATES["upsert_entity"]
             for item in list_data:
@@ -2561,17 +2586,19 @@ class PGVectorStorage(BaseVectorStorage):
                     chunk_ids = source_id.split("<SEP>")
                 else:
                     chunk_ids = [source_id]
-                records.append((
-                    self.workspace,
-                    item["__id__"],
-                    item["entity_name"],
-                    item["content"],
-                    json.dumps(item["__vector__"].tolist()),
-                    chunk_ids,
-                    item.get("file_path"),
-                    current_time,
-                    current_time,
-                ))
+                records.append(
+                    (
+                        self.workspace,
+                        item["__id__"],
+                        item["entity_name"],
+                        item["content"],
+                        json.dumps(item["__vector__"].tolist()),
+                        chunk_ids,
+                        item.get("file_path"),
+                        current_time,
+                        current_time,
+                    )
+                )
         elif is_namespace(self.namespace, NameSpace.VECTOR_STORE_RELATIONSHIPS):
             upsert_sql = SQL_TEMPLATES["upsert_relationship"]
             for item in list_data:
@@ -2580,18 +2607,20 @@ class PGVectorStorage(BaseVectorStorage):
                     chunk_ids = source_id.split("<SEP>")
                 else:
                     chunk_ids = [source_id]
-                records.append((
-                    self.workspace,
-                    item["__id__"],
-                    item["src_id"],
-                    item["tgt_id"],
-                    item["content"],
-                    json.dumps(item["__vector__"].tolist()),
-                    chunk_ids,
-                    item.get("file_path"),
-                    current_time,
-                    current_time,
-                ))
+                records.append(
+                    (
+                        self.workspace,
+                        item["__id__"],
+                        item["src_id"],
+                        item["tgt_id"],
+                        item["content"],
+                        json.dumps(item["__vector__"].tolist()),
+                        chunk_ids,
+                        item.get("file_path"),
+                        current_time,
+                        current_time,
+                    )
+                )
         else:
             raise ValueError(f"{self.namespace} is not supported")
 
@@ -2935,10 +2964,12 @@ class PGDocStatusStorage(DocStatusStorage):
         if result is None or result == []:
             # Additional query to check if document exists with any workspace (diagnostic)
             try:
-                check_sql = "SELECT workspace, id FROM LIGHTRAG_DOC_STATUS WHERE id=$1 LIMIT 1"
+                check_sql = (
+                    "SELECT workspace, id FROM LIGHTRAG_DOC_STATUS WHERE id=$1 LIMIT 1"
+                )
                 check_result = await self.db.query(check_sql, [id], True)
                 if check_result:
-                    actual_workspace = check_result[0].get('workspace', 'unknown')
+                    actual_workspace = check_result[0].get("workspace", "unknown")
                     logger.warning(
                         f"[{self.workspace}] PGDocStatusStorage.get_by_id: document {id} not found "
                         f"with workspace='{self.workspace}', but EXISTS with workspace='{actual_workspace}'"
@@ -2973,7 +3004,9 @@ class PGDocStatusStorage(DocStatusStorage):
 
             return dict(
                 id=str(result[0]["id"]),
-                workspace=result[0].get("workspace"),  # Include workspace for verification
+                workspace=result[0].get(
+                    "workspace"
+                ),  # Include workspace for verification
                 content_length=result[0]["content_length"],
                 content_summary=result[0]["content_summary"],
                 status=result[0]["status"],
@@ -3082,7 +3115,9 @@ class PGDocStatusStorage(DocStatusStorage):
 
             return dict(
                 id=str(result[0]["id"]),
-                workspace=result[0].get("workspace"),  # Include workspace for verification
+                workspace=result[0].get(
+                    "workspace"
+                ),  # Include workspace for verification
                 content_length=result[0]["content_length"],
                 content_summary=result[0]["content_summary"],
                 status=result[0]["status"],
@@ -3496,7 +3531,9 @@ class PGDocStatusStorage(DocStatusStorage):
                 },
             )
 
-    async def try_claim(self, doc_id: str, data: dict[str, Any]) -> tuple[bool, dict[str, Any] | None]:
+    async def try_claim(
+        self, doc_id: str, data: dict[str, Any]
+    ) -> tuple[bool, dict[str, Any] | None]:
         """Atomically try to claim a document ID for processing.
 
         Uses INSERT ... ON CONFLICT DO NOTHING to ensure only one caller
@@ -3512,6 +3549,7 @@ class PGDocStatusStorage(DocStatusStorage):
             - (True, None): Successfully claimed, document was inserted
             - (False, existing_doc): Already claimed by another request
         """
+
         def parse_datetime(dt_str):
             """Parse datetime and ensure it's stored as UTC time in database"""
             if dt_str is None:
@@ -3583,7 +3621,9 @@ class PGDocStatusStorage(DocStatusStorage):
                 return (False, existing)
             raise
 
-    async def claim_next_document(self, instance_id: str = None) -> dict[str, Any] | None:
+    async def claim_next_document(
+        self, instance_id: str = None
+    ) -> dict[str, Any] | None:
         """Atomically claim the next pending/failed document for processing.
 
         Uses SELECT ... FOR UPDATE SKIP LOCKED to ensure only one instance
@@ -3603,6 +3643,7 @@ class PGDocStatusStorage(DocStatusStorage):
             Document data dict if a document was claimed, None if no documents available
         """
         import time as time_module
+
         claim_start = time_module.perf_counter()
 
         await self.db._ensure_pool()
@@ -3639,11 +3680,15 @@ class PGDocStatusStorage(DocStatusStorage):
                 select_time = (time_module.perf_counter() - select_start) * 1000
 
                 if not row:
-                    logger.info(f"[PERF] Claim document: select={select_time:.1f}ms (no document available)")
+                    logger.info(
+                        f"[PERF] Claim document: select={select_time:.1f}ms (no document available)"
+                    )
                     return None
 
                 doc_id = row["id"]
-                logger.info(f"[PERF] Claim document: select={select_time:.1f}ms (found {doc_id})")
+                logger.info(
+                    f"[PERF] Claim document: select={select_time:.1f}ms (found {doc_id})"
+                )
 
                 # Update status to PROCESSING within the same transaction
                 await conn.execute(
@@ -3679,7 +3724,9 @@ class PGDocStatusStorage(DocStatusStorage):
                         metadata = {}
 
                 total_claim_time = (time_module.perf_counter() - claim_start) * 1000
-                logger.info(f"[PERF] Claim document: total={total_claim_time:.1f}ms (claimed {doc_id})")
+                logger.info(
+                    f"[PERF] Claim document: total={total_claim_time:.1f}ms (claimed {doc_id})"
+                )
 
                 return {
                     "id": doc_id,
@@ -3744,7 +3791,13 @@ class PGDocStatusStorage(DocStatusStorage):
                 return {
                     "status": "error",
                     "message": "No result from stored procedure",
-                    "documents": {"pending": 0, "processing": 0, "processed": 0, "failed": 0, "preprocessed": 0},
+                    "documents": {
+                        "pending": 0,
+                        "processing": 0,
+                        "processed": 0,
+                        "failed": 0,
+                        "preprocessed": 0,
+                    },
                     "graph": {"nodes": 0, "edges": 0},
                     "workspace_count": 0,
                     "queue_depth": 0,
@@ -3755,13 +3808,23 @@ class PGDocStatusStorage(DocStatusStorage):
             if isinstance(metrics, str):
                 metrics = json.loads(metrics)
 
-            return metrics if metrics else {
-                "status": "ok",
-                "documents": {"pending": 0, "processing": 0, "processed": 0, "failed": 0, "preprocessed": 0},
-                "graph": {"nodes": 0, "edges": 0},
-                "workspace_count": 0,
-                "queue_depth": 0,
-            }
+            return (
+                metrics
+                if metrics
+                else {
+                    "status": "ok",
+                    "documents": {
+                        "pending": 0,
+                        "processing": 0,
+                        "processed": 0,
+                        "failed": 0,
+                        "preprocessed": 0,
+                    },
+                    "graph": {"nodes": 0, "edges": 0},
+                    "workspace_count": 0,
+                    "queue_depth": 0,
+                }
+            )
 
         except Exception as e:
             logger.error(f"Failed to get aggregated metrics: {e}")
@@ -3769,7 +3832,13 @@ class PGDocStatusStorage(DocStatusStorage):
             return {
                 "status": "error",
                 "message": str(e),
-                "documents": {"pending": 0, "processing": 0, "processed": 0, "failed": 0, "preprocessed": 0},
+                "documents": {
+                    "pending": 0,
+                    "processing": 0,
+                    "processed": 0,
+                    "failed": 0,
+                    "preprocessed": 0,
+                },
                 "graph": {"nodes": 0, "edges": 0},
                 "workspace_count": 0,
                 "queue_depth": 0,
