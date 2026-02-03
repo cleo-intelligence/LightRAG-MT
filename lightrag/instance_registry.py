@@ -243,7 +243,9 @@ class InstanceRegistry:
             drained_ids = [row["instance_id"] for row in result]
 
             if drained_ids:
-                logger.info(f"Drain requested for {len(drained_ids)} instances: {drained_ids}")
+                logger.info(
+                    f"Drain requested for {len(drained_ids)} instances: {drained_ids}"
+                )
 
             return drained_ids
 
@@ -295,8 +297,12 @@ class InstanceRegistry:
                 {
                     "instance_id": row["instance_id"],
                     "hostname": row["hostname"],
-                    "started_at": row["started_at"].isoformat() if row["started_at"] else None,
-                    "last_heartbeat": row["last_heartbeat"].isoformat() if row["last_heartbeat"] else None,
+                    "started_at": row["started_at"].isoformat()
+                    if row["started_at"]
+                    else None,
+                    "last_heartbeat": row["last_heartbeat"].isoformat()
+                    if row["last_heartbeat"]
+                    else None,
                     "drain_requested": row["drain_requested"],
                     "drain_reason": row["drain_reason"],
                     "processing_count": row["processing_count"],
@@ -315,10 +321,14 @@ class InstanceRegistry:
         active_instances = [i for i in alive_instances if not i["drain_requested"]]
 
         # Safe to scale down when all draining instances are idle
-        safe_to_scale_down = all(
-            not i["pipeline_busy"] and i["processing_count"] == 0
-            for i in draining_instances
-        ) if draining_instances else False
+        safe_to_scale_down = (
+            all(
+                not i["pipeline_busy"] and i["processing_count"] == 0
+                for i in draining_instances
+            )
+            if draining_instances
+            else False
+        )
 
         return {
             "total_instances": len(instances),
@@ -410,6 +420,7 @@ class InstanceRegistry:
             try:
                 # Get current pipeline status
                 from .kg.shared_storage import is_any_pipeline_busy
+
                 pipeline_status = is_any_pipeline_busy()
 
                 await self.heartbeat(
