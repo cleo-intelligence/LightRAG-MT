@@ -2381,6 +2381,7 @@ def main():
         "host": global_args.host,
         "port": global_args.port,
         "log_config": None,  # Disable default config
+        "workers": 1,  # Explicit: app instance requires single worker mode
     }
 
     if global_args.ssl:
