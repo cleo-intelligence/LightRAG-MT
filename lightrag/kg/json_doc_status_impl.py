@@ -82,7 +82,8 @@ class JsonDocStatusStorage(DocStatusStorage):
             # Only consider documents as "existing" if they are NOT failed
             # This allows re-indexing of content that previously failed
             existing_non_failed = {
-                key for key, doc in self._data.items()
+                key
+                for key, doc in self._data.items()
                 if doc.get("status") != DocStatus.FAILED.value
             }
             return set(keys) - existing_non_failed

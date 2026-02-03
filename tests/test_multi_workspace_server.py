@@ -14,12 +14,11 @@ Tests are organized by user story to match the implementation plan.
 
 import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from lightrag.api.workspace_manager import (
     WorkspaceConfig,
     WorkspacePool,
-    WorkspaceInstance,
     validate_workspace_id,
     get_workspace_from_request,
     WORKSPACE_ID_PATTERN,
@@ -84,11 +83,13 @@ class TestWorkspacePool:
     @pytest.fixture
     def mock_rag_factory(self):
         """Create a mock RAG factory."""
+
         async def factory(workspace_id: str):
             mock_rag = MagicMock()
             mock_rag.workspace = workspace_id
             mock_rag.finalize_storages = AsyncMock()
             return mock_rag
+
         return factory
 
     @pytest.fixture

@@ -400,8 +400,7 @@ class MongoDocStatusStorage(DocStatusStorage):
         # Only consider documents as "existing" if they are NOT failed
         # This allows re-indexing of content that previously failed
         cursor = self._data.find(
-            {"_id": {"$in": list(data)}, "status": {"$ne": "failed"}},
-            {"_id": 1}
+            {"_id": {"$in": list(data)}, "status": {"$ne": "failed"}}, {"_id": 1}
         )
         existing_ids = {str(x["_id"]) async for x in cursor}
         return data - existing_ids
