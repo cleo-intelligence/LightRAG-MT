@@ -380,7 +380,7 @@ def create_app(args):
         app.state.background_tasks = set()
 
         # SIGTERM handler for graceful shutdown
-        shutdown_event = asyncio.Event()
+        _shutdown_event = asyncio.Event()  # Reserved for future use
 
         def sigterm_handler(signum, frame):
             """Handle SIGTERM signal for graceful shutdown."""

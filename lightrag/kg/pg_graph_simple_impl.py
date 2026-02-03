@@ -32,7 +32,7 @@ def _get_min_degree_for_graph_bfs() -> int:
     except ValueError:
         return DEFAULT_MIN_DEGREE_FOR_GRAPH_BFS
 
-from .postgres_impl import PostgreSQLDB, ClientManager, get_data_init_lock
+from .postgres_impl import PostgreSQLDB, ClientManager, get_data_init_lock  # noqa: E402
 
 
 # Table DDL for graph storage

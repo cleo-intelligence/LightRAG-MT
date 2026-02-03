@@ -186,13 +186,7 @@ class TestEntityResolver:
         """Test that only entities of the same type are merged."""
         resolver = EntityResolver(similarity_threshold=0.85)
 
-        all_nodes = {
-            "Apple": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
-            "Apple": [{"entity_type": "FRUIT", "description": "A fruit"}],  # Different type
-            "Apple Inc": [{"entity_type": "ORGANIZATION", "description": "Full name"}],
-        }
-
-        # Note: dict keys must be unique, so let's structure this differently
+        # Note: dict keys must be unique, so we use different entity names
         all_nodes = {
             "Apple Corp": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
             "Apple Fruit": [{"entity_type": "FRUIT", "description": "A fruit"}],
@@ -1073,10 +1067,10 @@ class TestFalsePositivePrevention:
         from lightrag.entity_resolution import compute_entity_similarity
 
         # These are different entities - different context qualifiers
-        score = compute_entity_similarity(
+        _score = compute_entity_similarity(
             "Clément Thomas Email",
             "Clément Thomas Email Secondaire"
-        )
+        )  # Score computed for documentation/debugging, assertion below documents behavior
         # This is tricky - they share most tokens but "Secondaire" is important
         # With prefix matching, "Clément Thomas Email" is a prefix of the other
         # So they would match. This test documents current behavior.

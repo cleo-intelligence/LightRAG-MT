@@ -16,6 +16,7 @@ from lightrag.utils import (
     logger,
     compute_mdhash_id,
     Tokenizer,
+    TokenTracker,
     is_float_regex,
     sanitize_and_normalize_extracted_text,
     pack_user_ass_to_openai_messages,
@@ -4676,7 +4677,8 @@ async def _perform_kg_search(
         if actual_embedding_func:
             try:
                 query_embedding = await actual_embedding_func(
-                    [query], token_tracker=global_config.get("token_tracker")
+                    [query],
+                    token_tracker=text_chunks_db.global_config.get("token_tracker"),
                 )
                 query_embedding = query_embedding[
                     0
@@ -5599,7 +5601,7 @@ async def _find_related_text_unit_from_entities(
                     entity_info=entities_with_chunks,
                     embedding_func=actual_embedding_func,
                     query_embedding=query_embedding,
-                    token_tracker=global_config.get("token_tracker"),
+                    token_tracker=text_chunks_db.global_config.get("token_tracker"),
                 )
 
                 if selected_chunk_ids == []:
@@ -5889,7 +5891,7 @@ async def _find_related_text_unit_from_relations(
                     entity_info=relations_with_chunks,
                     embedding_func=actual_embedding_func,
                     query_embedding=query_embedding,
-                    token_tracker=global_config.get("token_tracker"),
+                    token_tracker=text_chunks_db.global_config.get("token_tracker"),
                 )
 
                 if selected_chunk_ids == []:

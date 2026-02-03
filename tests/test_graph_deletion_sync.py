@@ -210,9 +210,9 @@ async def test_cache_deleted_before_rebuild(mock_graph_storage):
     """
     # Setup: Create mock cache and chunk storage
     mock_llm_cache = AsyncMock()
-    mock_text_chunks = AsyncMock()
+    _mock_text_chunks = AsyncMock()  # Reserved for future use
 
-    deleted_chunk_ids = ["chunk_1", "chunk_2", "chunk_3"]
+    _deleted_chunk_ids = ["chunk_1", "chunk_2", "chunk_3"]  # Reserved for future use
     cache_ids_to_delete = ["cache_1", "cache_2", "cache_3"]
 
     # Track order of operations
