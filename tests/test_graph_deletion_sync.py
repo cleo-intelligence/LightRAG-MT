@@ -348,12 +348,12 @@ async def test_graph_node_count_decreases_after_deletion(populated_graph_storage
     final_count = await count_graph_nodes(storage)
     expected_count = initial_count - len(nodes_to_delete)
 
-    assert final_count == expected_count, (
-        f"Expected {expected_count} nodes after deletion, got {final_count}"
-    )
-    assert final_count < initial_count, (
-        f"Node count did not decrease: {initial_count} -> {final_count}"
-    )
+    assert (
+        final_count == expected_count
+    ), f"Expected {expected_count} nodes after deletion, got {final_count}"
+    assert (
+        final_count < initial_count
+    ), f"Node count did not decrease: {initial_count} -> {final_count}"
 
 
 @pytest.mark.asyncio
@@ -420,9 +420,9 @@ async def test_graphs_endpoint_reflects_deletion(populated_graph_storage):
     final_stats = get_graph_stats(storage)
 
     # Verify stats reflect deletion
-    assert final_stats["nodes"] < initial_stats["nodes"], (
-        f"Node count should decrease: {initial_stats['nodes']} -> {final_stats['nodes']}"
-    )
+    assert (
+        final_stats["nodes"] < initial_stats["nodes"]
+    ), f"Node count should decrease: {initial_stats['nodes']} -> {final_stats['nodes']}"
 
 
 # ============================================================================

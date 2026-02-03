@@ -217,7 +217,9 @@ class TestEntityResolver:
 
         # Note: dict keys must be unique, so we use different entity names
         all_nodes = {
-            "Apple Corp": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
+            "Apple Corp": [
+                {"entity_type": "ORGANIZATION", "description": "Tech company"}
+            ],
             "Apple Fruit": [{"entity_type": "FRUIT", "description": "A fruit"}],
             "Apple Corp.": [
                 {"entity_type": "ORGANIZATION", "description": "Full name"}
@@ -1184,9 +1186,9 @@ class TestFalsePositivePrevention:
             "Impasse du Pré dEnfer", "617 Impasse du Pré denfer, 71260 Senozan"
         )
         # Default threshold is 0.85-0.92, so score below 0.85 means no merge
-        assert score < 0.85, (
-            f"Street name should not match full address at default threshold, got score {score}"
-        )
+        assert (
+            score < 0.85
+        ), f"Street name should not match full address at default threshold, got score {score}"
 
     def test_different_dates_not_merged(self):
         """Test that different dates are not merged."""
@@ -1202,8 +1204,7 @@ class TestFalsePositivePrevention:
 
         # These are different entities - different context qualifiers
         _score = compute_entity_similarity(
-            "Clément Thomas Email",
-            "Clément Thomas Email Secondaire"
+            "Clément Thomas Email", "Clément Thomas Email Secondaire"
         )  # Score computed for documentation/debugging, assertion below documents behavior
         # This is tricky - they share most tokens but "Secondaire" is important
         # With prefix matching, "Clément Thomas Email" is a prefix of the other
@@ -1218,9 +1219,9 @@ class TestFalsePositivePrevention:
 
         # "Acme" should match "Acme Ingenierie" (valid prefix)
         score = compute_entity_similarity("Acme", "Acme Ingenierie")
-        assert score >= 0.85, (
-            f"'Acme' should match 'Acme Ingenierie', got score {score}"
-        )
+        assert (
+            score >= 0.85
+        ), f"'Acme' should match 'Acme Ingenierie', got score {score}"
 
         # "Apple" should match "Apple Inc" (valid prefix)
         score = compute_entity_similarity("Apple", "Apple Inc")
@@ -1232,9 +1233,9 @@ class TestFalsePositivePrevention:
 
         # Different invoice numbers should NOT match
         score = compute_entity_similarity("Facture 24012823", "Facture 24012815")
-        assert score == 0.0, (
-            f"Different invoice numbers should not match, got score {score}"
-        )
+        assert (
+            score == 0.0
+        ), f"Different invoice numbers should not match, got score {score}"
 
         # Different years should NOT match
         score = compute_entity_similarity("Report 2023", "Report 2024")
@@ -1254,9 +1255,9 @@ class TestFalsePositivePrevention:
 
         # Same company with punctuation variations
         score = compute_entity_similarity("Apple Inc", "Apple Inc.")
-        assert score >= 0.92, (
-            f"'Apple Inc' should match 'Apple Inc.', got score {score}"
-        )
+        assert (
+            score >= 0.92
+        ), f"'Apple Inc' should match 'Apple Inc.', got score {score}"
 
         # Same company with legal form variations
         score = compute_entity_similarity("Thalie SAS", "Thalie")
