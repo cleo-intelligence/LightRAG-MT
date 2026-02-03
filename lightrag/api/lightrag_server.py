@@ -57,10 +57,8 @@ from lightrag.api.routers.graph_routes import create_graph_routes
 from lightrag.api.routers.ollama_api import OllamaAPI
 from lightrag.api.workspace_manager import (
     WorkspaceConfig,
-    WorkspacePool,
     init_workspace_pool,
     get_workspace_pool,
-    get_rag,
 )
 
 from lightrag.utils import logger, set_verbose_debug, get_llm_metrics
@@ -371,7 +369,9 @@ def create_app(args):
     # Graceful shutdown timeout (in seconds) - configurable via env var
     # Default: 300 seconds (5 minutes) - matches Render's maximum grace period
     # Note: Render maxShutdownDelaySeconds caps at 300s, so higher values are useless on Render
-    GRACEFUL_SHUTDOWN_TIMEOUT = int(os.getenv("LIGHTRAG_GRACEFUL_SHUTDOWN_TIMEOUT", "300"))
+    GRACEFUL_SHUTDOWN_TIMEOUT = int(
+        os.getenv("LIGHTRAG_GRACEFUL_SHUTDOWN_TIMEOUT", "300")
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -429,7 +429,10 @@ def create_app(args):
                     # Set callback to activate local drain mode when DB drain is requested
                     def on_drain_requested(drain_requested: bool, reason: str):
                         if drain_requested and not is_drain_mode_enabled():
-                            set_drain_mode(enabled=True, reason=reason or "Coordinated drain request")
+                            set_drain_mode(
+                                enabled=True,
+                                reason=reason or "Coordinated drain request",
+                            )
 
                     instance_registry.set_drain_callback(on_drain_requested)
 
@@ -1274,14 +1277,19 @@ def create_app(args):
         # This avoids re-initializing the default workspace
         from lightrag.api.workspace_manager import WorkspaceInstance
         import time
-        workspace_pool._instances[workspace_config.default_workspace] = WorkspaceInstance(
-            workspace_id=workspace_config.default_workspace,
-            rag_instance=rag,
-            created_at=time.time(),
-            last_accessed_at=time.time(),
+
+        workspace_pool._instances[workspace_config.default_workspace] = (
+            WorkspaceInstance(
+                workspace_id=workspace_config.default_workspace,
+                rag_instance=rag,
+                created_at=time.time(),
+                last_accessed_at=time.time(),
+            )
         )
         workspace_pool._lru_order.append(workspace_config.default_workspace)
-        logger.info(f"Pre-populated workspace pool with default workspace: {workspace_config.default_workspace}")
+        logger.info(
+            f"Pre-populated workspace pool with default workspace: {workspace_config.default_workspace}"
+        )
 
     # Add routes
     # Routes use get_rag dependency to resolve workspace-specific RAG instances
@@ -1726,7 +1734,8 @@ def create_app(args):
                 "alive_instances": 1,
                 "active_instances": 0 if drain_status["enabled"] else 1,
                 "draining_instances": 1 if drain_status["enabled"] else 0,
-                "safe_to_scale_down": drain_status["enabled"] and not pipeline_status["busy"],
+                "safe_to_scale_down": drain_status["enabled"]
+                and not pipeline_status["busy"],
                 "instances": [],
             }
 
@@ -1841,6 +1850,7 @@ def create_app(args):
         else:
             # Fallback if registry not initialized
             import socket
+
             instance_id = "unknown"
             hostname = socket.gethostname()
 
@@ -1899,7 +1909,9 @@ def create_app(args):
                     total_graph_edges = graph.get("edges", 0)
                     workspace_count = metrics.get("workspace_count", workspace_count)
             except Exception as e:
-                logger.warning(f"Stored procedure metrics failed, falling back to iteration: {e}")
+                logger.warning(
+                    f"Stored procedure metrics failed, falling back to iteration: {e}"
+                )
                 use_stored_procedure = False
 
         if not use_stored_procedure:
@@ -1910,20 +1922,37 @@ def create_app(args):
 
                     # Document status metrics
                     if hasattr(rag, "doc_status") and rag.doc_status is not None:
-                        pending_docs = await rag.doc_status.get_docs_by_status(DocStatus.PENDING)
-                        processing_docs = await rag.doc_status.get_docs_by_status(DocStatus.PROCESSING)
-                        processed_docs = await rag.doc_status.get_docs_by_status(DocStatus.PROCESSED)
-                        failed_docs = await rag.doc_status.get_docs_by_status(DocStatus.FAILED)
-                        preprocessed_docs = await rag.doc_status.get_docs_by_status(DocStatus.PREPROCESSED)
+                        pending_docs = await rag.doc_status.get_docs_by_status(
+                            DocStatus.PENDING
+                        )
+                        processing_docs = await rag.doc_status.get_docs_by_status(
+                            DocStatus.PROCESSING
+                        )
+                        processed_docs = await rag.doc_status.get_docs_by_status(
+                            DocStatus.PROCESSED
+                        )
+                        failed_docs = await rag.doc_status.get_docs_by_status(
+                            DocStatus.FAILED
+                        )
+                        preprocessed_docs = await rag.doc_status.get_docs_by_status(
+                            DocStatus.PREPROCESSED
+                        )
 
                         total_pending += len(pending_docs) if pending_docs else 0
-                        total_processing += len(processing_docs) if processing_docs else 0
+                        total_processing += (
+                            len(processing_docs) if processing_docs else 0
+                        )
                         total_processed += len(processed_docs) if processed_docs else 0
                         total_failed += len(failed_docs) if failed_docs else 0
-                        total_preprocessed += len(preprocessed_docs) if preprocessed_docs else 0
+                        total_preprocessed += (
+                            len(preprocessed_docs) if preprocessed_docs else 0
+                        )
 
                     # Graph metrics (if available)
-                    if hasattr(rag, "knowledge_graph_inst") and rag.knowledge_graph_inst is not None:
+                    if (
+                        hasattr(rag, "knowledge_graph_inst")
+                        and rag.knowledge_graph_inst is not None
+                    ):
                         kg = rag.knowledge_graph_inst
                         # Try to get node count (some backends cache this)
                         if hasattr(kg, "get_node_count"):
@@ -1941,7 +1970,9 @@ def create_app(args):
                                 pass
 
                 except Exception as e:
-                    logger.warning(f"Error getting metrics for workspace {workspace_id}: {e}")
+                    logger.warning(
+                        f"Error getting metrics for workspace {workspace_id}: {e}"
+                    )
                     continue
 
         # Get pipeline status
@@ -2015,38 +2046,40 @@ def create_app(args):
 
         # Get LLM metrics once
         llm_metrics = get_llm_metrics().get_metrics()
-        metrics_lines.extend([
-            "# HELP lightrag_llm_active_calls Number of LLM calls currently in flight",
-            "# TYPE lightrag_llm_active_calls gauge",
-            f'lightrag_llm_active_calls{{instance_id="{instance_id}"}} {llm_metrics["active_calls"]}',
-            "",
-            "# HELP lightrag_llm_total_calls Total LLM calls since startup",
-            "# TYPE lightrag_llm_total_calls counter",
-            f'lightrag_llm_total_calls{{instance_id="{instance_id}"}} {llm_metrics["total_calls"]}',
-            "",
-            "# HELP lightrag_llm_errors_total Total LLM call errors since startup",
-            "# TYPE lightrag_llm_errors_total counter",
-            f'lightrag_llm_errors_total{{instance_id="{instance_id}"}} {llm_metrics["total_errors"]}',
-            "",
-            "# HELP lightrag_llm_latency_avg_ms Average LLM call latency (rolling window, ms)",
-            "# TYPE lightrag_llm_latency_avg_ms gauge",
-            f'lightrag_llm_latency_avg_ms{{instance_id="{instance_id}"}} {llm_metrics["avg_latency_ms"]}',
-            "",
-            "# HELP lightrag_llm_queue_size Current LLM call queue depth",
-            "# TYPE lightrag_llm_queue_size gauge",
-            f'lightrag_llm_queue_size{{instance_id="{instance_id}"}} {llm_metrics["queue_size"]}',
-            "",
-            "# HELP lightrag_llm_max_concurrent Peak concurrent LLM calls since startup",
-            "# TYPE lightrag_llm_max_concurrent gauge",
-            f'lightrag_llm_max_concurrent{{instance_id="{instance_id}"}} {llm_metrics["max_concurrent"]}',
-            "",
-            "# ====== ASYNCIO TASKS ======",
-            "",
-            "# HELP lightrag_asyncio_tasks_total Total number of asyncio tasks in event loop",
-            "# TYPE lightrag_asyncio_tasks_total gauge",
-            f'lightrag_asyncio_tasks_total{{instance_id="{instance_id}"}} {len(asyncio.all_tasks())}',
-            "",
-        ])
+        metrics_lines.extend(
+            [
+                "# HELP lightrag_llm_active_calls Number of LLM calls currently in flight",
+                "# TYPE lightrag_llm_active_calls gauge",
+                f'lightrag_llm_active_calls{{instance_id="{instance_id}"}} {llm_metrics["active_calls"]}',
+                "",
+                "# HELP lightrag_llm_total_calls Total LLM calls since startup",
+                "# TYPE lightrag_llm_total_calls counter",
+                f'lightrag_llm_total_calls{{instance_id="{instance_id}"}} {llm_metrics["total_calls"]}',
+                "",
+                "# HELP lightrag_llm_errors_total Total LLM call errors since startup",
+                "# TYPE lightrag_llm_errors_total counter",
+                f'lightrag_llm_errors_total{{instance_id="{instance_id}"}} {llm_metrics["total_errors"]}',
+                "",
+                "# HELP lightrag_llm_latency_avg_ms Average LLM call latency (rolling window, ms)",
+                "# TYPE lightrag_llm_latency_avg_ms gauge",
+                f'lightrag_llm_latency_avg_ms{{instance_id="{instance_id}"}} {llm_metrics["avg_latency_ms"]}',
+                "",
+                "# HELP lightrag_llm_queue_size Current LLM call queue depth",
+                "# TYPE lightrag_llm_queue_size gauge",
+                f'lightrag_llm_queue_size{{instance_id="{instance_id}"}} {llm_metrics["queue_size"]}',
+                "",
+                "# HELP lightrag_llm_max_concurrent Peak concurrent LLM calls since startup",
+                "# TYPE lightrag_llm_max_concurrent gauge",
+                f'lightrag_llm_max_concurrent{{instance_id="{instance_id}"}} {llm_metrics["max_concurrent"]}',
+                "",
+                "# ====== ASYNCIO TASKS ======",
+                "",
+                "# HELP lightrag_asyncio_tasks_total Total number of asyncio tasks in event loop",
+                "# TYPE lightrag_asyncio_tasks_total gauge",
+                f'lightrag_asyncio_tasks_total{{instance_id="{instance_id}"}} {len(asyncio.all_tasks())}',
+                "",
+            ]
+        )
 
         # Database pool metrics (if PostgreSQL backend is used)
         db_pool_size = 0
@@ -2073,51 +2106,57 @@ def create_app(args):
                             db_pool_available = True
                             break  # Only need one pool (shared across storages)
             except Exception as e:
-                logger.debug(f"Could not get DB pool metrics from workspace {workspace_id}: {e}")
+                logger.debug(
+                    f"Could not get DB pool metrics from workspace {workspace_id}: {e}"
+                )
                 continue
 
         if db_pool_available:
-            metrics_lines.extend([
-                "# ====== DATABASE POOL METRICS ======",
-                "",
-                "# HELP lightrag_db_pool_size Current number of connections in pool",
-                "# TYPE lightrag_db_pool_size gauge",
-                f'lightrag_db_pool_size{{instance_id="{instance_id}"}} {db_pool_size}',
-                "",
-                "# HELP lightrag_db_pool_idle Number of idle connections in pool",
-                "# TYPE lightrag_db_pool_idle gauge",
-                f'lightrag_db_pool_idle{{instance_id="{instance_id}"}} {db_pool_idle}',
-                "",
-                "# HELP lightrag_db_pool_active Number of active (in-use) connections",
-                "# TYPE lightrag_db_pool_active gauge",
-                f'lightrag_db_pool_active{{instance_id="{instance_id}"}} {db_pool_size - db_pool_idle}',
-                "",
-                "# HELP lightrag_db_pool_max Maximum pool size",
-                "# TYPE lightrag_db_pool_max gauge",
-                f'lightrag_db_pool_max{{instance_id="{instance_id}"}} {db_pool_max}',
-                "",
-                "# HELP lightrag_db_pool_min Minimum pool size",
-                "# TYPE lightrag_db_pool_min gauge",
-                f'lightrag_db_pool_min{{instance_id="{instance_id}"}} {db_pool_min}',
-                "",
-                "# HELP lightrag_db_pool_utilization Pool utilization percentage",
-                "# TYPE lightrag_db_pool_utilization gauge",
-                f'lightrag_db_pool_utilization{{instance_id="{instance_id}"}} {(db_pool_size - db_pool_idle) / db_pool_max * 100 if db_pool_max > 0 else 0:.1f}',
-                "",
-            ])
+            metrics_lines.extend(
+                [
+                    "# ====== DATABASE POOL METRICS ======",
+                    "",
+                    "# HELP lightrag_db_pool_size Current number of connections in pool",
+                    "# TYPE lightrag_db_pool_size gauge",
+                    f'lightrag_db_pool_size{{instance_id="{instance_id}"}} {db_pool_size}',
+                    "",
+                    "# HELP lightrag_db_pool_idle Number of idle connections in pool",
+                    "# TYPE lightrag_db_pool_idle gauge",
+                    f'lightrag_db_pool_idle{{instance_id="{instance_id}"}} {db_pool_idle}',
+                    "",
+                    "# HELP lightrag_db_pool_active Number of active (in-use) connections",
+                    "# TYPE lightrag_db_pool_active gauge",
+                    f'lightrag_db_pool_active{{instance_id="{instance_id}"}} {db_pool_size - db_pool_idle}',
+                    "",
+                    "# HELP lightrag_db_pool_max Maximum pool size",
+                    "# TYPE lightrag_db_pool_max gauge",
+                    f'lightrag_db_pool_max{{instance_id="{instance_id}"}} {db_pool_max}',
+                    "",
+                    "# HELP lightrag_db_pool_min Minimum pool size",
+                    "# TYPE lightrag_db_pool_min gauge",
+                    f'lightrag_db_pool_min{{instance_id="{instance_id}"}} {db_pool_min}',
+                    "",
+                    "# HELP lightrag_db_pool_utilization Pool utilization percentage",
+                    "# TYPE lightrag_db_pool_utilization gauge",
+                    f'lightrag_db_pool_utilization{{instance_id="{instance_id}"}} {(db_pool_size - db_pool_idle) / db_pool_max * 100 if db_pool_max > 0 else 0:.1f}',
+                    "",
+                ]
+            )
 
-        metrics_lines.extend([
-            "# ====== INFO ======",
-            "",
-            "# HELP lightrag_instance_info Instance identification for multi-instance deployments",
-            "# TYPE lightrag_instance_info gauge",
-            f'lightrag_instance_info{{instance_id="{instance_id}",hostname="{hostname}"}} 1',
-            "",
-            "# HELP lightrag_info LightRAG version info",
-            "# TYPE lightrag_info gauge",
-            f'lightrag_info{{version="{core_version}",api_version="{__api_version__}",instance_id="{instance_id}"}} 1',
-            "",
-        ])
+        metrics_lines.extend(
+            [
+                "# ====== INFO ======",
+                "",
+                "# HELP lightrag_instance_info Instance identification for multi-instance deployments",
+                "# TYPE lightrag_instance_info gauge",
+                f'lightrag_instance_info{{instance_id="{instance_id}",hostname="{hostname}"}} 1',
+                "",
+                "# HELP lightrag_info LightRAG version info",
+                "# TYPE lightrag_info gauge",
+                f'lightrag_info{{version="{core_version}",api_version="{__api_version__}",instance_id="{instance_id}"}} 1',
+                "",
+            ]
+        )
 
         return PlainTextResponse(
             content="\n".join(metrics_lines),

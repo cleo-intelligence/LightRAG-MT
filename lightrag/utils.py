@@ -724,7 +724,9 @@ def priority_limit_async_func_call(
                                 args,
                                 kwargs,
                             ) = await asyncio.wait_for(queue.get(), timeout=1.0)
-                            idle_seconds = 0  # Reset idle counter on successful task retrieval
+                            idle_seconds = (
+                                0  # Reset idle counter on successful task retrieval
+                            )
                         except asyncio.TimeoutError:
                             # Check idle timeout (if enabled)
                             if worker_idle_timeout > 0:
@@ -868,8 +870,7 @@ def priority_limit_async_func_call(
                     if pending_queue_items > 0 and active_tasks_count < max_size:
                         # Spawn enough workers to handle pending work, up to max_size
                         workers_needed = min(
-                            pending_queue_items,
-                            max_size - active_tasks_count
+                            pending_queue_items, max_size - active_tasks_count
                         )
                         logger.info(
                             f"{queue_name}: Creating {workers_needed} workers for {pending_queue_items} pending tasks"
@@ -919,7 +920,9 @@ def priority_limit_async_func_call(
 
                 # Create initial worker tasks - start with reasonable worker count
                 # Health check will scale up as needed when queue has pending work
-                initial_workers = min(16, max_size) - active_tasks_count  # Start with up to 16 workers
+                initial_workers = (
+                    min(16, max_size) - active_tasks_count
+                )  # Start with up to 16 workers
                 if initial_workers > 0:
                     for _ in range(initial_workers):
                         task = asyncio.create_task(worker())
@@ -1024,9 +1027,7 @@ def priority_limit_async_func_call(
 
             # Create task state
             call_start_time = asyncio.get_event_loop().time()
-            task_state = TaskState(
-                future=future, start_time=call_start_time
-            )
+            task_state = TaskState(future=future, start_time=call_start_time)
 
             # Track metrics
             metrics = get_llm_metrics()
@@ -2810,15 +2811,19 @@ class TokenTracker:
             f"Total tokens: {usage['total_tokens']}",
         ]
         if embedding["call_count"] > 0:
-            parts.extend([
-                f"Embedding calls: {embedding['call_count']}",
-                f"Embedding tokens: {embedding['total_tokens']}",
-            ])
+            parts.extend(
+                [
+                    f"Embedding calls: {embedding['call_count']}",
+                    f"Embedding tokens: {embedding['total_tokens']}",
+                ]
+            )
         if rerank["call_count"] > 0:
-            parts.extend([
-                f"Rerank calls: {rerank['call_count']}",
-                f"Rerank search_units: {rerank['search_units']}",
-            ])
+            parts.extend(
+                [
+                    f"Rerank calls: {rerank['call_count']}",
+                    f"Rerank search_units: {rerank['search_units']}",
+                ]
+            )
         return ", ".join(parts)
 
 

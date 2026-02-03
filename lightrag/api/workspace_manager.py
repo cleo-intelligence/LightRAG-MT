@@ -151,9 +151,7 @@ class WorkspacePool:
             rag_instance = await self._rag_factory(workspace_id)
 
             elapsed = time.time() - start_time
-            logger.info(
-                f"Workspace initialized in {elapsed:.2f}s: {workspace_id}"
-            )
+            logger.info(f"Workspace initialized in {elapsed:.2f}s: {workspace_id}")
 
             async with self._lock:
                 instance = WorkspaceInstance(

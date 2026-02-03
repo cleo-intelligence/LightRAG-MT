@@ -7,7 +7,7 @@ features work together correctly in realistic scenarios.
 
 import pytest
 from lightrag.entity_resolution import EntityResolver
-from lightrag.conflict_detection import ConflictDetector, ConflictInfo
+from lightrag.conflict_detection import ConflictDetector
 
 
 class TestEntityResolutionIntegration:
@@ -20,25 +20,43 @@ class TestEntityResolutionIntegration:
         all_nodes = {
             # Apple variations
             "Apple Inc": [
-                {"entity_type": "ORGANIZATION", "description": "Tech company founded in 1976"},
-                {"entity_type": "ORGANIZATION", "description": "Based in Cupertino, California"},
+                {
+                    "entity_type": "ORGANIZATION",
+                    "description": "Tech company founded in 1976",
+                },
+                {
+                    "entity_type": "ORGANIZATION",
+                    "description": "Based in Cupertino, California",
+                },
             ],
             "Apple Inc.": [
-                {"entity_type": "ORGANIZATION", "description": "Makes iPhones and Macs"},
+                {
+                    "entity_type": "ORGANIZATION",
+                    "description": "Makes iPhones and Macs",
+                },
             ],
             "APPLE INC": [
-                {"entity_type": "ORGANIZATION", "description": "Market cap over $2 trillion"},
+                {
+                    "entity_type": "ORGANIZATION",
+                    "description": "Market cap over $2 trillion",
+                },
             ],
             # Google variations
             "Google LLC": [
                 {"entity_type": "ORGANIZATION", "description": "Search engine company"},
             ],
             "Google": [
-                {"entity_type": "ORGANIZATION", "description": "Subsidiary of Alphabet"},
+                {
+                    "entity_type": "ORGANIZATION",
+                    "description": "Subsidiary of Alphabet",
+                },
             ],
             # Tesla - no variations
             "Tesla": [
-                {"entity_type": "ORGANIZATION", "description": "Electric vehicle manufacturer"},
+                {
+                    "entity_type": "ORGANIZATION",
+                    "description": "Electric vehicle manufacturer",
+                },
             ],
         }
 
@@ -73,7 +91,10 @@ class TestConflictDetectionIntegration:
     def test_conflict_detection_full_workflow(self):
         """Test complete conflict detection workflow with multiple sources."""
         descriptions = [
-            ("Tesla was founded in 2003 by Martin Eberhard and Marc Tarpenning.", "doc_001"),
+            (
+                "Tesla was founded in 2003 by Martin Eberhard and Marc Tarpenning.",
+                "doc_001",
+            ),
             ("Tesla was founded in 2004.", "doc_002"),
             ("Tesla is headquartered in Austin, Texas.", "doc_003"),
             ("Tesla produces electric vehicles and energy storage systems.", "doc_004"),
@@ -121,13 +142,25 @@ class TestCombinedWorkflow:
         # First, resolve entities
         all_nodes = {
             "Tesla Inc": [
-                {"entity_type": "ORGANIZATION", "description": "Founded in 2003", "source_id": "doc_001"},
+                {
+                    "entity_type": "ORGANIZATION",
+                    "description": "Founded in 2003",
+                    "source_id": "doc_001",
+                },
             ],
             "Tesla Inc.": [
-                {"entity_type": "ORGANIZATION", "description": "Founded in 2004", "source_id": "doc_002"},
+                {
+                    "entity_type": "ORGANIZATION",
+                    "description": "Founded in 2004",
+                    "source_id": "doc_002",
+                },
             ],
             "TESLA": [
-                {"entity_type": "ORGANIZATION", "description": "Electric vehicle maker", "source_id": "doc_003"},
+                {
+                    "entity_type": "ORGANIZATION",
+                    "description": "Electric vehicle maker",
+                    "source_id": "doc_003",
+                },
             ],
         }
 
@@ -144,8 +177,7 @@ class TestCombinedWorkflow:
 
         # Build description tuples for conflict detection
         descriptions_with_sources = [
-            (e.get("description", ""), e.get("source_id", "unknown"))
-            for e in entities
+            (e.get("description", ""), e.get("source_id", "unknown")) for e in entities
         ]
 
         # Detect conflicts
@@ -164,7 +196,9 @@ class TestEdgeCasesIntegration:
     async def test_short_names_excluded_from_resolution(self):
         """Test that short names don't get fuzzy matched."""
         all_nodes = {
-            "AI": [{"entity_type": "CONCEPT", "description": "Artificial Intelligence"}],
+            "AI": [
+                {"entity_type": "CONCEPT", "description": "Artificial Intelligence"}
+            ],
             "AI Inc": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
         }
 
@@ -180,8 +214,12 @@ class TestEdgeCasesIntegration:
     async def test_different_types_not_merged(self):
         """Test that entities of different types are not merged."""
         all_nodes = {
-            "Paris France": [{"entity_type": "LOCATION", "description": "City in France"}],
-            "Paris Hotel": [{"entity_type": "ORGANIZATION", "description": "Luxury hotel"}],
+            "Paris France": [
+                {"entity_type": "LOCATION", "description": "City in France"}
+            ],
+            "Paris Hotel": [
+                {"entity_type": "ORGANIZATION", "description": "Luxury hotel"}
+            ],
         }
 
         resolver = EntityResolver(similarity_threshold=0.85)

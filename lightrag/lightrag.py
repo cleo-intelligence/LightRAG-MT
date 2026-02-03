@@ -503,7 +503,9 @@ class LightRAG:
 
     conflict_confidence_threshold: float = field(
         default=get_env_value(
-            "CONFLICT_CONFIDENCE_THRESHOLD", DEFAULT_CONFLICT_CONFIDENCE_THRESHOLD, float
+            "CONFLICT_CONFIDENCE_THRESHOLD",
+            DEFAULT_CONFLICT_CONFIDENCE_THRESHOLD,
+            float,
         )
     )
     """Minimum confidence score (0.0-1.0) for logging detected conflicts."""
@@ -526,9 +528,7 @@ class LightRAG:
     """Entity count threshold for hybrid mode to switch from full to VDB matching."""
 
     cross_doc_vdb_top_k: int = field(
-        default=get_env_value(
-            "CROSS_DOC_VDB_TOP_K", DEFAULT_CROSS_DOC_VDB_TOP_K, int
-        )
+        default=get_env_value("CROSS_DOC_VDB_TOP_K", DEFAULT_CROSS_DOC_VDB_TOP_K, int)
     )
     """Number of VDB candidates to retrieve for similarity comparison in VDB mode."""
 
@@ -1457,7 +1457,7 @@ class LightRAG:
         # Get docs ids
         all_new_doc_ids = set(new_docs.keys())
         # Exclude IDs of documents that are already enqueued
-        doc_status_workspace = getattr(self.doc_status, 'workspace', 'unknown')
+        doc_status_workspace = getattr(self.doc_status, "workspace", "unknown")
         logger.debug(
             f"[{self.workspace}] Checking for duplicates: {len(all_new_doc_ids)} doc_ids, "
             f"doc_status.workspace={doc_status_workspace}"
@@ -1485,7 +1485,9 @@ class LightRAG:
                 )
                 # Get workspace from existing doc for verification (should match self.workspace)
                 existing_workspace = (
-                    existing_doc.get("workspace", self.workspace) if existing_doc else self.workspace
+                    existing_doc.get("workspace", self.workspace)
+                    if existing_doc
+                    else self.workspace
                 )
 
                 # CRITICAL: Verify workspace isolation
@@ -1513,10 +1515,14 @@ class LightRAG:
 
                 # True duplicate: different track_id, same workspace
                 existing_file_path = (
-                    existing_doc.get("file_path", "unknown") if existing_doc else "unknown"
+                    existing_doc.get("file_path", "unknown")
+                    if existing_doc
+                    else "unknown"
                 )
                 existing_created_at = (
-                    existing_doc.get("created_at", "unknown") if existing_doc else "unknown"
+                    existing_doc.get("created_at", "unknown")
+                    if existing_doc
+                    else "unknown"
                 )
                 logger.warning(
                     f"[{self.workspace}] Duplicate document detected: {doc_id}\n"
@@ -1580,8 +1586,8 @@ class LightRAG:
             for doc_id in new_docs.keys()
         }
         # Diagnostic: log workspace info before storing documents
-        full_docs_workspace = getattr(self.full_docs, 'workspace', 'unknown')
-        doc_status_workspace = getattr(self.doc_status, 'workspace', 'unknown')
+        full_docs_workspace = getattr(self.full_docs, "workspace", "unknown")
+        doc_status_workspace = getattr(self.doc_status, "workspace", "unknown")
         logger.info(
             f"[{self.workspace}] Enqueue: storing {len(full_docs_data)} docs in full_docs "
             f"(full_docs.workspace={full_docs_workspace})"
@@ -1683,8 +1689,8 @@ class LightRAG:
         successful_deletions = 0
 
         # Diagnostic: log workspace info at start of consistency check
-        full_docs_workspace = getattr(self.full_docs, 'workspace', 'unknown')
-        doc_status_workspace = getattr(self.doc_status, 'workspace', 'unknown')
+        full_docs_workspace = getattr(self.full_docs, "workspace", "unknown")
+        doc_status_workspace = getattr(self.doc_status, "workspace", "unknown")
         logger.info(
             f"[{self.workspace}] _validate_and_fix_document_consistency: "
             f"checking {len(to_process_docs)} docs, "
@@ -2159,8 +2165,10 @@ class LightRAG:
                             # Stage 2: Process entity relation graph (after text_chunks are saved)
                             entity_relation_task = asyncio.create_task(
                                 self._process_extract_entities(
-                                    chunks, pipeline_status, pipeline_status_lock,
-                                    token_tracker=token_tracker
+                                    chunks,
+                                    pipeline_status,
+                                    pipeline_status_lock,
+                                    token_tracker=token_tracker,
                                 )
                             )
                             chunk_results = await entity_relation_task
@@ -2195,12 +2203,16 @@ class LightRAG:
                             all_tasks = first_stage_tasks + (
                                 [entity_relation_task] if entity_relation_task else []
                             )
-                            tasks_to_cancel = [t for t in all_tasks if t and not t.done()]
+                            tasks_to_cancel = [
+                                t for t in all_tasks if t and not t.done()
+                            ]
                             for task in tasks_to_cancel:
                                 task.cancel()
                             # Await cancellation to prevent phantom workers
                             if tasks_to_cancel:
-                                await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+                                await asyncio.gather(
+                                    *tasks_to_cancel, return_exceptions=True
+                                )
 
                             # Persistent llm cache with error handling
                             if self.llm_response_cache:
@@ -2218,9 +2230,13 @@ class LightRAG:
                             llm_usage = token_tracker.get_llm_usage()
                             embedding_usage = token_tracker.get_embedding_usage()
                             partial_token_usage = {
-                                "embedding_tokens": embedding_usage.get("total_tokens", 0),
+                                "embedding_tokens": embedding_usage.get(
+                                    "total_tokens", 0
+                                ),
                                 "llm_input_tokens": llm_usage.get("prompt_tokens", 0),
-                                "llm_output_tokens": llm_usage.get("completion_tokens", 0),
+                                "llm_output_tokens": llm_usage.get(
+                                    "completion_tokens", 0
+                                ),
                                 "total_chunks": 0,  # Unknown on failure
                                 "embedding_model": embedding_usage.get("model"),
                                 "llm_model": llm_usage.get("model"),
@@ -2299,19 +2315,32 @@ class LightRAG:
                                 # Get deduplication token usage (merge phase)
                                 dedup_llm_usage = dedup_token_tracker.get_llm_usage()
                                 token_usage = {
-                                    "embedding_tokens": embedding_usage.get("total_tokens", 0),
-                                    "llm_input_tokens": llm_usage.get("prompt_tokens", 0),
-                                    "llm_output_tokens": llm_usage.get("completion_tokens", 0),
+                                    "embedding_tokens": embedding_usage.get(
+                                        "total_tokens", 0
+                                    ),
+                                    "llm_input_tokens": llm_usage.get(
+                                        "prompt_tokens", 0
+                                    ),
+                                    "llm_output_tokens": llm_usage.get(
+                                        "completion_tokens", 0
+                                    ),
                                     "total_chunks": len(chunks),
                                     "embedding_model": embedding_usage.get("model"),
                                     "llm_model": llm_usage.get("model"),
                                     # Deduplication/merge phase tokens (separate tracking)
-                                    "dedup_input_tokens": dedup_llm_usage.get("prompt_tokens", 0),
-                                    "dedup_output_tokens": dedup_llm_usage.get("completion_tokens", 0),
+                                    "dedup_input_tokens": dedup_llm_usage.get(
+                                        "prompt_tokens", 0
+                                    ),
+                                    "dedup_output_tokens": dedup_llm_usage.get(
+                                        "completion_tokens", 0
+                                    ),
                                 }
 
                                 # Log dedup token usage for debugging
-                                if dedup_llm_usage.get("prompt_tokens", 0) > 0 or dedup_llm_usage.get("completion_tokens", 0) > 0:
+                                if (
+                                    dedup_llm_usage.get("prompt_tokens", 0) > 0
+                                    or dedup_llm_usage.get("completion_tokens", 0) > 0
+                                ):
                                     logger.info(
                                         f"[DEDUP] Token usage for doc {doc_id}: "
                                         f"input={dedup_llm_usage.get('prompt_tokens', 0)}, "
@@ -2395,15 +2424,25 @@ class LightRAG:
                                 # Get partial deduplication token usage (merge phase)
                                 dedup_llm_usage = dedup_token_tracker.get_llm_usage()
                                 partial_token_usage = {
-                                    "embedding_tokens": embedding_usage.get("total_tokens", 0),
-                                    "llm_input_tokens": llm_usage.get("prompt_tokens", 0),
-                                    "llm_output_tokens": llm_usage.get("completion_tokens", 0),
+                                    "embedding_tokens": embedding_usage.get(
+                                        "total_tokens", 0
+                                    ),
+                                    "llm_input_tokens": llm_usage.get(
+                                        "prompt_tokens", 0
+                                    ),
+                                    "llm_output_tokens": llm_usage.get(
+                                        "completion_tokens", 0
+                                    ),
                                     "total_chunks": len(chunks) if chunks else 0,
                                     "embedding_model": embedding_usage.get("model"),
                                     "llm_model": llm_usage.get("model"),
                                     # Deduplication/merge phase tokens (separate tracking, may be partial)
-                                    "dedup_input_tokens": dedup_llm_usage.get("prompt_tokens", 0),
-                                    "dedup_output_tokens": dedup_llm_usage.get("completion_tokens", 0),
+                                    "dedup_input_tokens": dedup_llm_usage.get(
+                                        "prompt_tokens", 0
+                                    ),
+                                    "dedup_output_tokens": dedup_llm_usage.get(
+                                        "completion_tokens", 0
+                                    ),
                                 }
 
                                 # Update document status to failed
@@ -2570,17 +2609,19 @@ class LightRAG:
 
         # Mark pipeline as busy locally (for this instance's status tracking)
         async with pipeline_status_lock:
-            pipeline_status.update({
-                "busy": True,
-                "job_name": f"Parallel processing (instance {instance_id[:8]})",
-                "job_start": datetime.now(timezone.utc).isoformat(),
-                "docs": 0,
-                "batchs": pending_count,  # Approximate - may change as other instances claim
-                "cur_batch": 0,
-                "request_pending": False,
-                "cancellation_requested": False,
-                "latest_message": f"Starting parallel document processing",
-            })
+            pipeline_status.update(
+                {
+                    "busy": True,
+                    "job_name": f"Parallel processing (instance {instance_id[:8]})",
+                    "job_start": datetime.now(timezone.utc).isoformat(),
+                    "docs": 0,
+                    "batchs": pending_count,  # Approximate - may change as other instances claim
+                    "cur_batch": 0,
+                    "request_pending": False,
+                    "cancellation_requested": False,
+                    "latest_message": "Starting parallel document processing",
+                }
+            )
             del pipeline_status["history_messages"][:]
 
         processed_count = 0
@@ -2594,7 +2635,9 @@ class LightRAG:
 
                 # Check for drain mode
                 if is_drain_mode_enabled():
-                    logger.info(f"[{self.workspace}] Drain mode - stopping document claiming")
+                    logger.info(
+                        f"[{self.workspace}] Drain mode - stopping document claiming"
+                    )
                     break
 
                 # Try to claim the next document
@@ -2621,7 +2664,9 @@ class LightRAG:
                 async with pipeline_status_lock:
                     processed_count += 1
                     pipeline_status["cur_batch"] = processed_count
-                    log_message = f"Processing doc {processed_count}: {file_path} ({doc_id})"
+                    log_message = (
+                        f"Processing doc {processed_count}: {file_path} ({doc_id})"
+                    )
                     logger.info(log_message)
                     pipeline_status["latest_message"] = log_message
                     pipeline_status["history_messages"].append(log_message)
@@ -2664,28 +2709,40 @@ class LightRAG:
 
                     # Mark document as failed with timing and partial token usage
                     error_msg = f"Processing failed: {str(e)}"
-                    logger.error(f"[{self.workspace}] Document {doc_id} failed: {error_msg}")
-                    await self.doc_status.upsert({
-                        doc_id: {
-                            "status": DocStatus.FAILED,
-                            "error_msg": error_msg[:1000],  # Truncate long errors
-                            "content_summary": claimed_doc.get("content_summary", ""),
-                            "content_length": claimed_doc.get("content_length", 0),
-                            "file_path": file_path,
-                            "track_id": claimed_doc.get("track_id"),  # Preserve track_id
-                            "created_at": claimed_doc.get("created_at"),  # Preserve created_at
-                            "updated_at": datetime.now(timezone.utc).isoformat(),
-                            "metadata": {
-                                **claimed_doc.get("metadata", {}),
-                                "processing_start_time": processing_start_time,
-                                "processing_end_time": processing_end_time,
-                                "token_usage": partial_token_usage,
-                            },
+                    logger.error(
+                        f"[{self.workspace}] Document {doc_id} failed: {error_msg}"
+                    )
+                    await self.doc_status.upsert(
+                        {
+                            doc_id: {
+                                "status": DocStatus.FAILED,
+                                "error_msg": error_msg[:1000],  # Truncate long errors
+                                "content_summary": claimed_doc.get(
+                                    "content_summary", ""
+                                ),
+                                "content_length": claimed_doc.get("content_length", 0),
+                                "file_path": file_path,
+                                "track_id": claimed_doc.get(
+                                    "track_id"
+                                ),  # Preserve track_id
+                                "created_at": claimed_doc.get(
+                                    "created_at"
+                                ),  # Preserve created_at
+                                "updated_at": datetime.now(timezone.utc).isoformat(),
+                                "metadata": {
+                                    **claimed_doc.get("metadata", {}),
+                                    "processing_start_time": processing_start_time,
+                                    "processing_end_time": processing_end_time,
+                                    "token_usage": partial_token_usage,
+                                },
+                            }
                         }
-                    })
+                    )
 
         finally:
-            log_message = f"Instance {instance_id[:8]} processed {processed_count} documents"
+            log_message = (
+                f"Instance {instance_id[:8]} processed {processed_count} documents"
+            )
             logger.info(f"[{self.workspace}] {log_message}")
             async with pipeline_status_lock:
                 pipeline_status["busy"] = False
@@ -2748,7 +2805,9 @@ class LightRAG:
             chunking_result = await chunking_result
 
         if not isinstance(chunking_result, (list, tuple)):
-            raise TypeError(f"chunking_func must return a list or tuple, got {type(chunking_result)}")
+            raise TypeError(
+                f"chunking_func must return a list or tuple, got {type(chunking_result)}"
+            )
 
         # Build chunks dictionary
         chunks = {
@@ -2764,36 +2823,42 @@ class LightRAG:
         if not chunks:
             logger.warning(f"No chunks generated for document {doc_id}")
             # Mark as processed anyway
-            await self.doc_status.upsert({
-                doc_id: {
-                    "status": DocStatus.PROCESSED,
-                    "content_summary": claimed_doc.get("content_summary", ""),
-                    "content_length": claimed_doc.get("content_length", 0),
-                    "chunks_count": 0,
-                    "file_path": file_path,
-                    "track_id": claimed_doc.get("track_id"),  # Preserve track_id
-                    "created_at": claimed_doc.get("created_at"),  # Preserve created_at
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+            await self.doc_status.upsert(
+                {
+                    doc_id: {
+                        "status": DocStatus.PROCESSED,
+                        "content_summary": claimed_doc.get("content_summary", ""),
+                        "content_length": claimed_doc.get("content_length", 0),
+                        "chunks_count": 0,
+                        "file_path": file_path,
+                        "track_id": claimed_doc.get("track_id"),  # Preserve track_id
+                        "created_at": claimed_doc.get(
+                            "created_at"
+                        ),  # Preserve created_at
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
                 }
-            })
+            )
             return
 
         processing_start_time = int(time.time())
 
         # Update document status with chunks info
-        await self.doc_status.upsert({
-            doc_id: {
-                "status": DocStatus.PROCESSING,
-                "chunks_count": len(chunks),
-                "chunks_list": list(chunks.keys()),
-                "content_summary": claimed_doc.get("content_summary", ""),
-                "content_length": claimed_doc.get("content_length", 0),
-                "file_path": file_path,
-                "track_id": claimed_doc.get("track_id"),  # Preserve track_id
-                "created_at": claimed_doc.get("created_at"),  # Preserve created_at
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+        await self.doc_status.upsert(
+            {
+                doc_id: {
+                    "status": DocStatus.PROCESSING,
+                    "chunks_count": len(chunks),
+                    "chunks_list": list(chunks.keys()),
+                    "content_summary": claimed_doc.get("content_summary", ""),
+                    "content_length": claimed_doc.get("content_length", 0),
+                    "file_path": file_path,
+                    "track_id": claimed_doc.get("track_id"),  # Preserve track_id
+                    "created_at": claimed_doc.get("created_at"),  # Preserve created_at
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
             }
-        })
+        )
 
         # Store chunks (text + vector embeddings in parallel)
         await asyncio.gather(
@@ -2815,7 +2880,9 @@ class LightRAG:
         # Check for cancellation before processing results
         async with pipeline_status_lock:
             if pipeline_status.get("cancellation_requested", False):
-                raise PipelineCancelledException("User cancelled before processing results")
+                raise PipelineCancelledException(
+                    "User cancelled before processing results"
+                )
 
         # Create separate token tracker for deduplication/merge phase
         dedup_token_tracker = TokenTracker()
@@ -2865,7 +2932,10 @@ class LightRAG:
         }
 
         # Log dedup token usage for debugging
-        if dedup_llm_usage.get("prompt_tokens", 0) > 0 or dedup_llm_usage.get("completion_tokens", 0) > 0:
+        if (
+            dedup_llm_usage.get("prompt_tokens", 0) > 0
+            or dedup_llm_usage.get("completion_tokens", 0) > 0
+        ):
             logger.info(
                 f"[DEDUP] Token usage for doc {doc_id}: "
                 f"input={dedup_llm_usage.get('prompt_tokens', 0)}, "
@@ -2873,24 +2943,26 @@ class LightRAG:
             )
 
         # Mark document as processed
-        await self.doc_status.upsert({
-            doc_id: {
-                "status": DocStatus.PROCESSED,
-                "content_summary": claimed_doc.get("content_summary", ""),
-                "content_length": claimed_doc.get("content_length", 0),
-                "chunks_count": len(chunks),
-                "chunks_list": list(chunks.keys()),
-                "file_path": file_path,
-                "track_id": claimed_doc.get("track_id"),  # Preserve track_id
-                "created_at": claimed_doc.get("created_at"),  # Preserve created_at
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-                "metadata": {
-                    **claimed_doc.get("metadata", {}),
-                    "processing_time_seconds": processing_time,
-                    "token_usage": token_usage,
-                },
+        await self.doc_status.upsert(
+            {
+                doc_id: {
+                    "status": DocStatus.PROCESSED,
+                    "content_summary": claimed_doc.get("content_summary", ""),
+                    "content_length": claimed_doc.get("content_length", 0),
+                    "chunks_count": len(chunks),
+                    "chunks_list": list(chunks.keys()),
+                    "file_path": file_path,
+                    "track_id": claimed_doc.get("track_id"),  # Preserve track_id
+                    "created_at": claimed_doc.get("created_at"),  # Preserve created_at
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "metadata": {
+                        **claimed_doc.get("metadata", {}),
+                        "processing_time_seconds": processing_time,
+                        "token_usage": token_usage,
+                    },
+                }
             }
-        })
+        )
 
         # Persist data after processing
         await self._insert_done()
@@ -2902,8 +2974,11 @@ class LightRAG:
             pipeline_status["history_messages"].append(log_message)
 
     async def _process_extract_entities(
-        self, chunk: dict[str, Any], pipeline_status=None, pipeline_status_lock=None,
-        token_tracker: TokenTracker = None
+        self,
+        chunk: dict[str, Any],
+        pipeline_status=None,
+        pipeline_status_lock=None,
+        token_tracker: TokenTracker = None,
     ) -> list:
         try:
             # Build global_config with token_tracker included
@@ -3848,7 +3923,7 @@ class LightRAG:
         try:
             # 1. Get the document status and related data
             # Debug: Log doc_status workspace before lookup (batch deletion debugging)
-            doc_status_workspace = getattr(self.doc_status, 'workspace', 'unknown')
+            doc_status_workspace = getattr(self.doc_status, "workspace", "unknown")
             logger.debug(
                 f"[{self.workspace}] Looking for doc_id={doc_id} in doc_status "
                 f"(doc_status.workspace={doc_status_workspace})"
@@ -4233,8 +4308,12 @@ class LightRAG:
                 graph_store = self.chunk_entity_relation_graph
                 if hasattr(graph_store, "_get_graph"):
                     graph_before = await graph_store._get_graph()
-                    node_count_before = graph_before.number_of_nodes() if graph_before else 0
-                    edge_count_before = graph_before.number_of_edges() if graph_before else 0
+                    node_count_before = (
+                        graph_before.number_of_nodes() if graph_before else 0
+                    )
+                    edge_count_before = (
+                        graph_before.number_of_edges() if graph_before else 0
+                    )
                 elif hasattr(graph_store, "get_node_count"):
                     node_count_before = await graph_store.get_node_count()
                     edge_count_before = -1  # Not available without _get_graph
@@ -4391,8 +4470,12 @@ class LightRAG:
                 graph_store = self.chunk_entity_relation_graph
                 if hasattr(graph_store, "_get_graph"):
                     graph_after = await graph_store._get_graph()
-                    node_count_after = graph_after.number_of_nodes() if graph_after else 0
-                    edge_count_after = graph_after.number_of_edges() if graph_after else 0
+                    node_count_after = (
+                        graph_after.number_of_nodes() if graph_after else 0
+                    )
+                    edge_count_after = (
+                        graph_after.number_of_edges() if graph_after else 0
+                    )
                 elif hasattr(graph_store, "get_node_count"):
                     node_count_after = await graph_store.get_node_count()
                     edge_count_after = -1
@@ -4465,7 +4548,9 @@ class LightRAG:
 
                     except Exception as e:
                         logger.error(f"Failed to rebuild knowledge from chunks: {e}")
-                        raise Exception(f"Failed to rebuild knowledge graph: {e}") from e
+                        raise Exception(
+                            f"Failed to rebuild knowledge graph: {e}"
+                        ) from e
 
             # 10. Delete from full_entities and full_relations storage
             try:
@@ -4493,7 +4578,9 @@ class LightRAG:
                 status_code=200,
                 file_path=file_path,
                 entities_to_rebuild=entities_to_rebuild if skip_rebuild else None,
-                relationships_to_rebuild=relationships_to_rebuild if skip_rebuild else None,
+                relationships_to_rebuild=relationships_to_rebuild
+                if skip_rebuild
+                else None,
             )
 
         except Exception as e:

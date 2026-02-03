@@ -5,13 +5,9 @@ Verifies token tracking, usage reporting, and cost estimation.
 Feature: 003-api-usage-metering
 """
 
-import pytest
-from unittest.mock import MagicMock, AsyncMock
-
 from lightrag.utils import TokenTracker
 from lightrag.api.models.usage import (
     LLMUsageInfo,
-    EmbeddingUsageInfo,
     UsageInfo,
     UsageAggregateResponse,
 )
@@ -222,7 +218,9 @@ class TestEmbeddingUsageTracking:
         tracker = TokenTracker()
 
         # Simulate document processing with multiple embedding calls
-        tracker.add_embedding_usage({"total_tokens": 100}, model="text-embedding-3-small")
+        tracker.add_embedding_usage(
+            {"total_tokens": 100}, model="text-embedding-3-small"
+        )
         tracker.add_embedding_usage({"total_tokens": 150})
         tracker.add_embedding_usage({"total_tokens": 200})
 
@@ -251,7 +249,9 @@ class TestEmbeddingUsageTracking:
         tracker = TokenTracker()
 
         # Only embedding calls
-        tracker.add_embedding_usage({"total_tokens": 50}, model="text-embedding-3-large")
+        tracker.add_embedding_usage(
+            {"total_tokens": 50}, model="text-embedding-3-large"
+        )
 
         usage_info = UsageInfo.from_token_tracker(tracker)
 

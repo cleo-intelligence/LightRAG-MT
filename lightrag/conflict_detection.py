@@ -10,11 +10,10 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import ClassVar
 
 from lightrag.constants import (
-    DEFAULT_ENABLE_CONFLICT_DETECTION,
     DEFAULT_CONFLICT_CONFIDENCE_THRESHOLD,
 )
 
@@ -86,8 +85,17 @@ class ConflictInfo:
 # - "Founded in 2003" vs "Report 2023" = NOT a conflict (different contexts)
 # Current pattern-based detection can't make this distinction, so we skip most types.
 SKIP_TEMPORAL_TYPES: set[str] = {
-    "data", "artifact", "document", "report", "period", "event",
-    "person", "organization", "company", "geo", "location",
+    "data",
+    "artifact",
+    "document",
+    "report",
+    "period",
+    "event",
+    "person",
+    "organization",
+    "company",
+    "geo",
+    "location",
 }
 
 # Period patterns - dates within these patterns should not trigger conflicts
@@ -342,18 +350,19 @@ class ConflictDetector:
 
         # Determine which conflict types to check based on entity type
         skip_temporal = (
-            entity_type is not None
-            and entity_type.lower() in SKIP_TEMPORAL_TYPES
+            entity_type is not None and entity_type.lower() in SKIP_TEMPORAL_TYPES
         )
 
         # Define what to check for each conflict type
         conflict_checks = []
         if not skip_temporal:
             conflict_checks.append(("temporal", self.DATE_PATTERNS))
-        conflict_checks.extend([
-            ("attribution", self.ATTRIBUTION_PATTERNS),
-            ("numerical", self.NUMBER_PATTERNS),
-        ])
+        conflict_checks.extend(
+            [
+                ("attribution", self.ATTRIBUTION_PATTERNS),
+                ("numerical", self.NUMBER_PATTERNS),
+            ]
+        )
 
         # Compare all pairs of descriptions
         for i, (desc_a, source_a) in enumerate(descriptions):
@@ -370,12 +379,14 @@ class ConflictDetector:
                     # and dates within period patterns
                     if conflict_type == "temporal":
                         values_a = [
-                            v for v in values_a
+                            v
+                            for v in values_a
                             if not self._is_date_in_entity_name(entity_name, v[0])
                             and not self._is_within_period_pattern(desc_a, v[0], v[1])
                         ]
                         values_b = [
-                            v for v in values_b
+                            v
+                            for v in values_b
                             if not self._is_date_in_entity_name(entity_name, v[0])
                             and not self._is_within_period_pattern(desc_b, v[0], v[1])
                         ]

@@ -1640,6 +1640,7 @@ async def _merge_nodes_then_upsert(
         tuple: (node_data, vdb_data) where vdb_data is dict for batch VDB upsert or None if entity_vdb is None
     """
     import time as perf_time
+
     merge_start = perf_time.perf_counter()
 
     already_entity_types = []
@@ -1669,7 +1670,9 @@ async def _merge_nodes_then_upsert(
         already_description.extend(already_node["description"].split(GRAPH_FIELD_SEP))
         # Get maturity state
         is_summarized = already_node.get("is_summarized", False)
-        existing_pending_descriptions = already_node.get("pending_descriptions", "") or ""
+        existing_pending_descriptions = (
+            already_node.get("pending_descriptions", "") or ""
+        )
         existing_pending_tokens = already_node.get("pending_tokens", 0) or 0
 
     new_source_ids = [dp["source_id"] for dp in nodes_data if dp.get("source_id")]
@@ -1805,7 +1808,9 @@ async def _merge_nodes_then_upsert(
         # Join new descriptions with existing pending
         new_descs_text = GRAPH_FIELD_SEP.join(sorted_descriptions)
         if existing_pending_descriptions:
-            new_pending_descriptions = existing_pending_descriptions + GRAPH_FIELD_SEP + new_descs_text
+            new_pending_descriptions = (
+                existing_pending_descriptions + GRAPH_FIELD_SEP + new_descs_text
+            )
         else:
             new_pending_descriptions = new_descs_text
 
@@ -1848,7 +1853,10 @@ async def _merge_nodes_then_upsert(
 
         # 7.5 Detect conflicts in descriptions if enabled
         step_start = perf_time.perf_counter()
-        if global_config.get("enable_conflict_detection", True) and len(description_list) >= 2:
+        if (
+            global_config.get("enable_conflict_detection", True)
+            and len(description_list) >= 2
+        ):
             # Build description tuples with source IDs for conflict detection
             descriptions_with_sources = []
             # Add existing descriptions (no individual source_id available)
@@ -1863,7 +1871,9 @@ async def _merge_nodes_then_upsert(
 
             # Run conflict detection
             detector = ConflictDetector(
-                confidence_threshold=global_config.get("conflict_confidence_threshold", 0.7)
+                confidence_threshold=global_config.get(
+                    "conflict_confidence_threshold", 0.7
+                )
             )
             conflicts = detector.detect_conflicts(
                 entity_name, descriptions_with_sources, entity_type=entity_type
@@ -2026,7 +2036,11 @@ async def _merge_nodes_then_upsert(
     total_time = (perf_time.perf_counter() - merge_start) * 1000
     # Log detailed timing only if significant time was spent (> 100ms) or LLM was used
     if total_time > 100 or llm_was_used:
-        maturity_info = f" mature={is_summarized} pending={new_pending_tokens}" if enable_entity_maturity else ""
+        maturity_info = (
+            f" mature={is_summarized} pending={new_pending_tokens}"
+            if enable_entity_maturity
+            else ""
+        )
         logger.info(
             f"[PERF] Entity merge '{entity_name}': total={total_time:.1f}ms "
             f"(get_node={get_node_time:.1f}, get_chunks={get_chunks_time:.1f}, "
@@ -2064,6 +2078,7 @@ async def _merge_edges_then_upsert(
         return None, None
 
     import time as perf_time
+
     merge_start = perf_time.perf_counter()
 
     already_edge = None
@@ -2093,15 +2108,11 @@ async def _merge_edges_then_upsert(
 
         # Get source_id with empty string default if missing or None
         if already_edge.get("source_id") is not None:
-            already_source_ids.extend(
-                already_edge["source_id"].split(GRAPH_FIELD_SEP)
-            )
+            already_source_ids.extend(already_edge["source_id"].split(GRAPH_FIELD_SEP))
 
         # Get file_path with empty string default if missing or None
         if already_edge.get("file_path") is not None:
-            already_file_paths.extend(
-                already_edge["file_path"].split(GRAPH_FIELD_SEP)
-            )
+            already_file_paths.extend(already_edge["file_path"].split(GRAPH_FIELD_SEP))
 
         # Get description with empty string default if missing or None
         if already_edge.get("description") is not None:
@@ -2119,7 +2130,9 @@ async def _merge_edges_then_upsert(
 
         # Get maturity state
         is_summarized = already_edge.get("is_summarized", False)
-        existing_pending_descriptions = already_edge.get("pending_descriptions", "") or ""
+        existing_pending_descriptions = (
+            already_edge.get("pending_descriptions", "") or ""
+        )
         existing_pending_tokens = already_edge.get("pending_tokens", 0) or 0
 
     new_source_ids = [dp["source_id"] for dp in edges_data if dp.get("source_id")]
@@ -2272,7 +2285,9 @@ async def _merge_edges_then_upsert(
         # Relation is mature: accumulate new descriptions in pending
         new_descs_text = GRAPH_FIELD_SEP.join(sorted_descriptions)
         if existing_pending_descriptions:
-            new_pending_descriptions = existing_pending_descriptions + GRAPH_FIELD_SEP + new_descs_text
+            new_pending_descriptions = (
+                existing_pending_descriptions + GRAPH_FIELD_SEP + new_descs_text
+            )
         else:
             new_pending_descriptions = new_descs_text
 
@@ -2311,7 +2326,10 @@ async def _merge_edges_then_upsert(
 
         # 7.5 Detect conflicts in descriptions if enabled
         step_start = perf_time.perf_counter()
-        if global_config.get("enable_conflict_detection", True) and len(description_list) >= 2:
+        if (
+            global_config.get("enable_conflict_detection", True)
+            and len(description_list) >= 2
+        ):
             # Build description tuples with source IDs for conflict detection
             descriptions_with_sources = []
             # Add existing descriptions (no individual source_id available)
@@ -2326,9 +2344,13 @@ async def _merge_edges_then_upsert(
 
             # Run conflict detection
             detector = ConflictDetector(
-                confidence_threshold=global_config.get("conflict_confidence_threshold", 0.7)
+                confidence_threshold=global_config.get(
+                    "conflict_confidence_threshold", 0.7
+                )
             )
-            conflicts = detector.detect_conflicts(relation_name, descriptions_with_sources)
+            conflicts = detector.detect_conflicts(
+                relation_name, descriptions_with_sources
+            )
 
             # Format conflicts for prompt if any were found
             if conflicts:
@@ -2634,7 +2656,9 @@ async def _merge_edges_then_upsert(
             truncate=truncation_info,
             # Relation maturity fields
             is_summarized=is_summarized,
-            pending_descriptions=new_pending_descriptions if enable_entity_maturity else "",
+            pending_descriptions=new_pending_descriptions
+            if enable_entity_maturity
+            else "",
             pending_tokens=new_pending_tokens if enable_entity_maturity else 0,
         ),
     )
@@ -2690,7 +2714,11 @@ async def _merge_edges_then_upsert(
     total_time = (perf_time.perf_counter() - merge_start) * 1000
     # Log detailed timing only if significant time was spent (> 100ms) or LLM was used
     if total_time > 100 or llm_was_used:
-        maturity_info = f" mature={is_summarized} pending={new_pending_tokens}" if enable_entity_maturity else ""
+        maturity_info = (
+            f" mature={is_summarized} pending={new_pending_tokens}"
+            if enable_entity_maturity
+            else ""
+        )
         logger.info(
             f"[PERF] Relation merge '{src_id}'~'{tgt_id}': total={total_time:.1f}ms "
             f"(get_edge={get_edge_time:.1f}, get_chunks={get_chunks_time:.1f}, "
@@ -2728,17 +2756,26 @@ async def _resolve_cross_document_entities(
         - resolution_map: Dict mapping old_name -> (new_name, score) for logging.
     """
     import time as time_module
-    from lightrag.entity_resolution import _normalize_for_matching, compute_entity_similarity
+    from lightrag.entity_resolution import (
+        _normalize_for_matching,
+        compute_entity_similarity,
+    )
 
-    similarity_threshold = global_config.get("entity_similarity_threshold", DEFAULT_ENTITY_SIMILARITY_THRESHOLD)
-    min_name_length = global_config.get("entity_min_name_length", DEFAULT_ENTITY_MIN_NAME_LENGTH)
+    similarity_threshold = global_config.get(
+        "entity_similarity_threshold", DEFAULT_ENTITY_SIMILARITY_THRESHOLD
+    )
+    min_name_length = global_config.get(
+        "entity_min_name_length", DEFAULT_ENTITY_MIN_NAME_LENGTH
+    )
 
     # 1. Get existing entity names from the knowledge graph
     get_all_start = time_module.perf_counter()
     try:
         existing_nodes = await knowledge_graph_inst.get_all_nodes()
         get_all_time = (time_module.perf_counter() - get_all_start) * 1000
-        logger.info(f"[PERF] Cross-doc full: get_all_nodes={get_all_time:.1f}ms ({len(existing_nodes)} existing entities)")
+        logger.info(
+            f"[PERF] Cross-doc full: get_all_nodes={get_all_time:.1f}ms ({len(existing_nodes)} existing entities)"
+        )
     except Exception as e:
         logger.warning(f"Failed to get existing nodes for cross-doc resolution: {e}")
         return dict(all_nodes), {}
@@ -2880,17 +2917,26 @@ async def _resolve_cross_document_entities_vdb(
         - resolution_map: Dict mapping old_name -> (new_name, score) for logging.
     """
     import time as time_module
-    from lightrag.entity_resolution import _normalize_for_matching, compute_entity_similarity
+    from lightrag.entity_resolution import (
+        _normalize_for_matching,
+        compute_entity_similarity,
+    )
 
-    similarity_threshold = global_config.get("entity_similarity_threshold", DEFAULT_ENTITY_SIMILARITY_THRESHOLD)
-    min_name_length = global_config.get("entity_min_name_length", DEFAULT_ENTITY_MIN_NAME_LENGTH)
+    similarity_threshold = global_config.get(
+        "entity_similarity_threshold", DEFAULT_ENTITY_SIMILARITY_THRESHOLD
+    )
+    min_name_length = global_config.get(
+        "entity_min_name_length", DEFAULT_ENTITY_MIN_NAME_LENGTH
+    )
     vdb_top_k = global_config.get("cross_doc_vdb_top_k", DEFAULT_CROSS_DOC_VDB_TOP_K)
 
     resolved_nodes: dict[str, list[dict]] = defaultdict(list)
     resolution_map: dict[str, tuple[str, float]] = {}
 
     # Step 1: Separate entities that need VDB lookup from those that don't
-    entities_to_query: list[tuple[str, list[dict], str]] = []  # (name, entities, entity_type)
+    entities_to_query: list[
+        tuple[str, list[dict], str]
+    ] = []  # (name, entities, entity_type)
 
     for entity_name, entities in all_nodes.items():
         entity_type = (
@@ -2914,9 +2960,13 @@ async def _resolve_cross_document_entities_vdb(
     try:
         embeddings = await entity_vdb.embedding_func(entity_names)
         embed_time = (time_module.perf_counter() - embed_start) * 1000
-        logger.info(f"[PERF] Cross-doc VDB: embedding={embed_time:.1f}ms ({len(entity_names)} entities)")
+        logger.info(
+            f"[PERF] Cross-doc VDB: embedding={embed_time:.1f}ms ({len(entity_names)} entities)"
+        )
     except Exception as e:
-        logger.warning(f"Batch embedding failed: {e}. Falling back to keeping all entities as-is.")
+        logger.warning(
+            f"Batch embedding failed: {e}. Falling back to keeping all entities as-is."
+        )
         for entity_name, entities, _ in entities_to_query:
             resolved_nodes[entity_name].extend(entities)
         return dict(resolved_nodes), resolution_map
@@ -2929,9 +2979,7 @@ async def _resolve_cross_document_entities_vdb(
         try:
             # Pass pre-computed embedding to avoid re-computing
             results = await entity_vdb.query(
-                entity_name,
-                top_k=vdb_top_k,
-                query_embedding=embedding
+                entity_name, top_k=vdb_top_k, query_embedding=embedding
             )
             return (idx, results)
         except Exception as e:
@@ -2943,7 +2991,9 @@ async def _resolve_cross_document_entities_vdb(
     query_tasks = [query_vdb_for_entity(i) for i in range(len(entities_to_query))]
     query_results = await asyncio.gather(*query_tasks)
     query_time = (time_module.perf_counter() - query_start) * 1000
-    logger.info(f"[PERF] Cross-doc VDB: queries={query_time:.1f}ms ({len(query_tasks)} parallel queries)")
+    logger.info(
+        f"[PERF] Cross-doc VDB: queries={query_time:.1f}ms ({len(query_tasks)} parallel queries)"
+    )
 
     # Step 5: Process results
     for idx, vdb_results in query_results:
@@ -3053,8 +3103,12 @@ async def _resolve_cross_document_entities_hybrid(
     """
     import time as time_module
 
-    mode = global_config.get("cross_doc_resolution_mode", DEFAULT_CROSS_DOC_RESOLUTION_MODE)
-    threshold = global_config.get("cross_doc_threshold_entities", DEFAULT_CROSS_DOC_THRESHOLD_ENTITIES)
+    mode = global_config.get(
+        "cross_doc_resolution_mode", DEFAULT_CROSS_DOC_RESOLUTION_MODE
+    )
+    threshold = global_config.get(
+        "cross_doc_threshold_entities", DEFAULT_CROSS_DOC_THRESHOLD_ENTITIES
+    )
 
     start_time = time_module.perf_counter()
 
@@ -3073,7 +3127,9 @@ async def _resolve_cross_document_entities_hybrid(
         try:
             entity_count = await knowledge_graph_inst.get_node_count()
         except Exception as e:
-            logger.warning(f"Failed to get node count: {e}. Using full mode as fallback.")
+            logger.warning(
+                f"Failed to get node count: {e}. Using full mode as fallback."
+            )
             entity_count = 0
 
         if entity_count >= threshold:
@@ -3165,8 +3221,12 @@ async def consolidate_graph_entities(
     if not global_config.get("enable_entity_resolution", True):
         return {}
 
-    similarity_threshold = global_config.get("entity_similarity_threshold", DEFAULT_ENTITY_SIMILARITY_THRESHOLD)
-    min_name_length = global_config.get("entity_min_name_length", DEFAULT_ENTITY_MIN_NAME_LENGTH)
+    similarity_threshold = global_config.get(
+        "entity_similarity_threshold", DEFAULT_ENTITY_SIMILARITY_THRESHOLD
+    )
+    min_name_length = global_config.get(
+        "entity_min_name_length", DEFAULT_ENTITY_MIN_NAME_LENGTH
+    )
     prefer_shorter = global_config.get("prefer_shorter_canonical_name", False)
 
     # 1. Get all entities from the knowledge graph
@@ -3179,7 +3239,9 @@ async def consolidate_graph_entities(
     if not existing_nodes or len(existing_nodes) < 2:
         return {}
 
-    logger.info(f"Post-processing consolidation: analyzing {len(existing_nodes)} entities")
+    logger.info(
+        f"Post-processing consolidation: analyzing {len(existing_nodes)} entities"
+    )
 
     # 2. Group entities by type
     entities_by_type: dict[str, list[tuple[str, str]]] = defaultdict(list)
@@ -3263,7 +3325,9 @@ async def consolidate_graph_entities(
         )
 
         # Step 5a: Batch graph consolidation (1 DB call for all entities)
-        use_batch_procedure = hasattr(knowledge_graph_inst, "consolidate_entities_batch")
+        use_batch_procedure = hasattr(
+            knowledge_graph_inst, "consolidate_entities_batch"
+        )
         graph_results = {}
 
         if use_batch_procedure:
@@ -3290,7 +3354,9 @@ async def consolidate_graph_entities(
                     f"{renamed_count} renamed, {skipped_count} skipped"
                 )
             except Exception as e:
-                logger.warning(f"Batch consolidation failed, falling back to individual: {e}")
+                logger.warning(
+                    f"Batch consolidation failed, falling back to individual: {e}"
+                )
                 use_batch_procedure = False
 
         # Fallback: individual consolidation (if batch not available)
@@ -3306,7 +3372,10 @@ async def consolidate_graph_entities(
                             old_name, canonical_name
                         )
                         if result.get("status") == "error":
-                            if result.get("message") == "stored_procedure_not_available":
+                            if (
+                                result.get("message")
+                                == "stored_procedure_not_available"
+                            ):
                                 logger.warning(
                                     "Stored procedure not available, falling back to Python"
                                 )
@@ -3322,10 +3391,15 @@ async def consolidate_graph_entities(
                     if not use_single_procedure:
                         old_node = await knowledge_graph_inst.get_node(old_name)
                         if not old_node:
-                            graph_results[old_name] = {"status": "skipped", "reason": "not_found"}
+                            graph_results[old_name] = {
+                                "status": "skipped",
+                                "reason": "not_found",
+                            }
                             continue
 
-                        canonical_node = await knowledge_graph_inst.get_node(canonical_name)
+                        canonical_node = await knowledge_graph_inst.get_node(
+                            canonical_name
+                        )
 
                         if canonical_node:
                             old_desc = old_node.get("description", "")
@@ -3334,13 +3408,18 @@ async def consolidate_graph_entities(
                                 merged_desc = f"{canonical_desc}\n{old_desc}".strip()
                                 await knowledge_graph_inst.upsert_node(
                                     canonical_name,
-                                    node_data={**canonical_node, "description": merged_desc}
+                                    node_data={
+                                        **canonical_node,
+                                        "description": merged_desc,
+                                    },
                                 )
 
                         old_edges = await knowledge_graph_inst.get_node_edges(old_name)
                         if old_edges:
                             for src, tgt in old_edges:
-                                edge_data = await knowledge_graph_inst.get_edge(src, tgt)
+                                edge_data = await knowledge_graph_inst.get_edge(
+                                    src, tgt
+                                )
                                 if not edge_data:
                                     edge_data = {}
                                 new_src = canonical_name if src == old_name else src
@@ -3381,32 +3460,40 @@ async def consolidate_graph_entities(
                         if old_chunks:
                             old_chunk_ids = old_chunks.get("chunk_ids", [])
                             # Merge with canonical entity's chunks
-                            canonical_chunks = await entity_chunks_storage.get_by_id(canonical_name)
+                            canonical_chunks = await entity_chunks_storage.get_by_id(
+                                canonical_name
+                            )
                             if canonical_chunks:
                                 # Merge chunk lists
-                                merged_chunks = list(set(
-                                    canonical_chunks.get("chunk_ids", []) +
-                                    old_chunk_ids
-                                ))
-                                await entity_chunks_storage.upsert({
-                                    canonical_name: {"chunk_ids": merged_chunks}
-                                })
+                                merged_chunks = list(
+                                    set(
+                                        canonical_chunks.get("chunk_ids", [])
+                                        + old_chunk_ids
+                                    )
+                                )
+                                await entity_chunks_storage.upsert(
+                                    {canonical_name: {"chunk_ids": merged_chunks}}
+                                )
                             else:
                                 # Just rename
-                                await entity_chunks_storage.upsert({
-                                    canonical_name: old_chunks
-                                })
+                                await entity_chunks_storage.upsert(
+                                    {canonical_name: old_chunks}
+                                )
                             # Delete old mapping
                             await entity_chunks_storage.delete([old_name])
                     except Exception as e:
-                        logger.warning(f"Could not update entity_chunks for '{old_name}': {e}")
+                        logger.warning(
+                            f"Could not update entity_chunks for '{old_name}': {e}"
+                        )
 
                 # Update full_entities storage (doc → entity mappings)
                 # Use chunk_ids to find affected documents
                 if full_entities_storage and text_chunks_storage and old_chunk_ids:
                     try:
                         # Get doc_ids from chunk data
-                        chunk_data_list = await text_chunks_storage.get_by_ids(old_chunk_ids)
+                        chunk_data_list = await text_chunks_storage.get_by_ids(
+                            old_chunk_ids
+                        )
                         affected_doc_ids = set()
                         for chunk_data in chunk_data_list:
                             if chunk_data and isinstance(chunk_data, dict):
@@ -3417,7 +3504,9 @@ async def consolidate_graph_entities(
                         # Update each affected document's entity list
                         for doc_id in affected_doc_ids:
                             try:
-                                doc_entities = await full_entities_storage.get_by_id(doc_id)
+                                doc_entities = await full_entities_storage.get_by_id(
+                                    doc_id
+                                )
                                 if doc_entities and "entity_names" in doc_entities:
                                     entity_names = doc_entities["entity_names"]
                                     if old_name in entity_names:
@@ -3428,9 +3517,9 @@ async def consolidate_graph_entities(
                                         ]
                                         # Deduplicate (canonical might already exist)
                                         updated_names = list(set(updated_names))
-                                        await full_entities_storage.upsert({
-                                            doc_id: {"entity_names": updated_names}
-                                        })
+                                        await full_entities_storage.upsert(
+                                            {doc_id: {"entity_names": updated_names}}
+                                        )
                                         logger.debug(
                                             f"Updated full_entities for doc '{doc_id}': "
                                             f"'{old_name}' → '{canonical_name}'"
@@ -3456,7 +3545,9 @@ async def consolidate_graph_entities(
                         pass  # Method may not exist or relation not in VDB
 
             except Exception as e:
-                logger.warning(f"Failed to consolidate '{old_name}' → '{canonical_name}': {e}")
+                logger.warning(
+                    f"Failed to consolidate '{old_name}' → '{canonical_name}': {e}"
+                )
 
         logger.info(
             f"Post-processing consolidation complete: "
@@ -3518,6 +3609,7 @@ async def merge_nodes_and_edges(
 
     # Performance timing for bottleneck identification
     import time as perf_time
+
     merge_start_time = perf_time.perf_counter()
 
     # Collect all nodes and edges from all chunks
@@ -3535,17 +3627,27 @@ async def merge_nodes_and_edges(
             all_edges[sorted_edge_key].extend(edges)
 
     collect_time = perf_time.perf_counter()
-    logger.info(f"[PERF] Collect nodes/edges: {(collect_time - merge_start_time)*1000:.1f}ms ({len(all_nodes)} nodes, {len(all_edges)} edges)")
+    logger.info(
+        f"[PERF] Collect nodes/edges: {(collect_time - merge_start_time) * 1000:.1f}ms ({len(all_nodes)} nodes, {len(all_edges)} edges)"
+    )
 
     # ===== Entity Resolution: Consolidate similar entity names =====
     if global_config.get("enable_entity_resolution", True):
         entity_res_start = perf_time.perf_counter()
         original_count = len(all_nodes)
         resolver = EntityResolver(
-            similarity_threshold=global_config.get("entity_similarity_threshold", DEFAULT_ENTITY_SIMILARITY_THRESHOLD),
-            min_name_length=global_config.get("entity_min_name_length", DEFAULT_ENTITY_MIN_NAME_LENGTH),
-            prefer_shorter_canonical_name=global_config.get("prefer_shorter_canonical_name", DEFAULT_PREFER_SHORTER_CANONICAL_NAME),
-            cpu_yield_interval=global_config.get("cpu_yield_interval", DEFAULT_CPU_YIELD_INTERVAL),
+            similarity_threshold=global_config.get(
+                "entity_similarity_threshold", DEFAULT_ENTITY_SIMILARITY_THRESHOLD
+            ),
+            min_name_length=global_config.get(
+                "entity_min_name_length", DEFAULT_ENTITY_MIN_NAME_LENGTH
+            ),
+            prefer_shorter_canonical_name=global_config.get(
+                "prefer_shorter_canonical_name", DEFAULT_PREFER_SHORTER_CANONICAL_NAME
+            ),
+            cpu_yield_interval=global_config.get(
+                "cpu_yield_interval", DEFAULT_CPU_YIELD_INTERVAL
+            ),
         )
         all_nodes = await resolver.consolidate_entities(dict(all_nodes))
         # Convert back to defaultdict for consistency with downstream code
@@ -3557,7 +3659,7 @@ async def merge_nodes_and_edges(
         resolved_count = len(all_nodes)
         entity_res_time = perf_time.perf_counter()
         logger.info(
-            f"[PERF] Entity resolution: {(entity_res_time - entity_res_start)*1000:.1f}ms "
+            f"[PERF] Entity resolution: {(entity_res_time - entity_res_start) * 1000:.1f}ms "
             f"({original_count} → {resolved_count} entities, merged {original_count - resolved_count})"
         )
 
@@ -3565,7 +3667,11 @@ async def merge_nodes_and_edges(
     if global_config.get("enable_entity_resolution", True):
         cross_doc_start = perf_time.perf_counter()
         pre_cross_doc_count = len(all_nodes)
-        all_nodes, cross_doc_resolutions, cross_doc_mode = await _resolve_cross_document_entities_hybrid(
+        (
+            all_nodes,
+            cross_doc_resolutions,
+            cross_doc_mode,
+        ) = await _resolve_cross_document_entities_hybrid(
             all_nodes, knowledge_graph_inst, entity_vdb, global_config
         )
         # Convert back to defaultdict for consistency with downstream code
@@ -3574,7 +3680,9 @@ async def merge_nodes_and_edges(
             cross_doc_nodes[entity_name] = entities
         all_nodes = cross_doc_nodes
         cross_doc_time = perf_time.perf_counter()
-        logger.info(f"[PERF] Cross-doc resolution ({cross_doc_mode}): {(cross_doc_time - cross_doc_start)*1000:.1f}ms ({len(cross_doc_resolutions)} resolved)")
+        logger.info(
+            f"[PERF] Cross-doc resolution ({cross_doc_mode}): {(cross_doc_time - cross_doc_start) * 1000:.1f}ms ({len(cross_doc_resolutions)} resolved)"
+        )
 
         # Log cross-document resolutions
         if cross_doc_resolutions:
@@ -3711,15 +3819,21 @@ async def merge_nodes_and_edges(
             raise first_exception
 
     phase1_time = perf_time.perf_counter()
-    logger.info(f"[PERF] Phase 1 (entities): {(phase1_time - phase1_start)*1000:.1f}ms ({total_entities_count} entities)")
+    logger.info(
+        f"[PERF] Phase 1 (entities): {(phase1_time - phase1_start) * 1000:.1f}ms ({total_entities_count} entities)"
+    )
 
     # Batch VDB upsert for entities
     if entity_vdb and entity_vdb_batch:
         vdb_upsert_start = perf_time.perf_counter()
-        logger.info(f"[PERF] Entity VDB batch upsert starting: {len(entity_vdb_batch)} entities")
+        logger.info(
+            f"[PERF] Entity VDB batch upsert starting: {len(entity_vdb_batch)} entities"
+        )
         await entity_vdb.upsert(entity_vdb_batch)
         vdb_upsert_time = perf_time.perf_counter()
-        logger.info(f"[PERF] Entity VDB batch upsert: {(vdb_upsert_time - vdb_upsert_start)*1000:.1f}ms ({len(entity_vdb_batch)} entities)")
+        logger.info(
+            f"[PERF] Entity VDB batch upsert: {(vdb_upsert_time - vdb_upsert_start) * 1000:.1f}ms ({len(entity_vdb_batch)} entities)"
+        )
 
     # ===== Phase 2: Process all relationships concurrently =====
     phase2_start = perf_time.perf_counter()
@@ -3849,15 +3963,21 @@ async def merge_nodes_and_edges(
             raise first_exception
 
     phase2_time = perf_time.perf_counter()
-    logger.info(f"[PERF] Phase 2 (relations): {(phase2_time - phase2_start)*1000:.1f}ms ({total_relations_count} relations)")
+    logger.info(
+        f"[PERF] Phase 2 (relations): {(phase2_time - phase2_start) * 1000:.1f}ms ({total_relations_count} relations)"
+    )
 
     # Batch VDB upsert for relationships
     if relationships_vdb and rel_vdb_batch:
         rel_vdb_upsert_start = perf_time.perf_counter()
-        logger.info(f"[PERF] Relationship VDB batch upsert starting: {len(rel_vdb_batch)} relationships")
+        logger.info(
+            f"[PERF] Relationship VDB batch upsert starting: {len(rel_vdb_batch)} relationships"
+        )
         await relationships_vdb.upsert(rel_vdb_batch)
         rel_vdb_upsert_time = perf_time.perf_counter()
-        logger.info(f"[PERF] Relationship VDB batch upsert: {(rel_vdb_upsert_time - rel_vdb_upsert_start)*1000:.1f}ms ({len(rel_vdb_batch)} relationships)")
+        logger.info(
+            f"[PERF] Relationship VDB batch upsert: {(rel_vdb_upsert_time - rel_vdb_upsert_start) * 1000:.1f}ms ({len(rel_vdb_batch)} relationships)"
+        )
 
     # ===== Phase 3: Update full_entities and full_relations storage =====
     phase3_start = perf_time.perf_counter()
@@ -3927,8 +4047,10 @@ async def merge_nodes_and_edges(
 
     phase3_time = perf_time.perf_counter()
     total_merge_time = phase3_time - merge_start_time
-    logger.info(f"[PERF] Phase 3 (storage): {(phase3_time - phase3_start)*1000:.1f}ms")
-    logger.info(f"[PERF] Total merge_nodes_and_edges: {total_merge_time*1000:.1f}ms")
+    logger.info(
+        f"[PERF] Phase 3 (storage): {(phase3_time - phase3_start) * 1000:.1f}ms"
+    )
+    logger.info(f"[PERF] Total merge_nodes_and_edges: {total_merge_time * 1000:.1f}ms")
 
     log_message = f"Completed merging: {len(processed_entities)} entities, {len(all_added_entities)} extra entities, {len(processed_edges)} relations"
     logger.info(log_message)
@@ -4102,7 +4224,9 @@ async def extract_entities(
                     original_desc_len = len(
                         maybe_edges[edge_key][0].get("description", "") or ""
                     )
-                    glean_desc_len = len(glean_edges_list[0].get("description", "") or "")
+                    glean_desc_len = len(
+                        glean_edges_list[0].get("description", "") or ""
+                    )
 
                     if glean_desc_len > original_desc_len:
                         maybe_edges[edge_key] = list(glean_edges_list)

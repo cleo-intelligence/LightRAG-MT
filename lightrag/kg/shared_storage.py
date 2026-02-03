@@ -1724,7 +1724,10 @@ def is_any_pipeline_busy() -> dict:
     # Iterate through all namespaces to find pipeline_status entries
     for namespace_key in list(_shared_dicts.keys()):
         # Check if this is a pipeline_status namespace
-        if namespace_key.endswith(":pipeline_status") or namespace_key == "pipeline_status":
+        if (
+            namespace_key.endswith(":pipeline_status")
+            or namespace_key == "pipeline_status"
+        ):
             try:
                 pipeline_data = _shared_dicts[namespace_key]
                 if pipeline_data.get("busy", False):
@@ -1782,7 +1785,9 @@ def set_drain_mode(enabled: bool, reason: str = "") -> dict:
         logger.info(f"Drain mode ENABLED: {_drain_mode['reason']}")
     elif not enabled and _drain_mode["enabled"]:
         # Exiting drain mode
-        logger.info(f"Drain mode DISABLED (was enabled since {_drain_mode['started_at']})")
+        logger.info(
+            f"Drain mode DISABLED (was enabled since {_drain_mode['started_at']})"
+        )
         _drain_mode = {
             "enabled": False,
             "reason": "",

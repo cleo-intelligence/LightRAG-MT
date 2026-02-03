@@ -28,7 +28,9 @@ from lightrag.utils import logger
 def _get_min_degree_for_graph_bfs() -> int:
     """Get minimum degree threshold for graph BFS from environment or default."""
     try:
-        return int(os.getenv("MIN_DEGREE_FOR_GRAPH_BFS", str(DEFAULT_MIN_DEGREE_FOR_GRAPH_BFS)))
+        return int(
+            os.getenv("MIN_DEGREE_FOR_GRAPH_BFS", str(DEFAULT_MIN_DEGREE_FOR_GRAPH_BFS))
+        )
     except ValueError:
         return DEFAULT_MIN_DEGREE_FOR_GRAPH_BFS
 
@@ -100,12 +102,16 @@ class PGGraphStorageSimple(BaseGraphStorage):
         # Recover db client if None
         if self.db is None:
             workspace = getattr(self, "workspace", "unknown")
-            logger.warning(f"[{workspace}] Database client is None, attempting recovery...")
+            logger.warning(
+                f"[{workspace}] Database client is None, attempting recovery..."
+            )
             try:
                 self.db = await ClientManager.get_client()
                 if self.db and self.db.workspace:
                     self.workspace = self.db.workspace
-                logger.info(f"[{self.workspace}] Database client recovered successfully")
+                logger.info(
+                    f"[{self.workspace}] Database client recovered successfully"
+                )
             except Exception as e:
                 logger.error(f"[{workspace}] Failed to recover database client: {e}")
                 raise PoolNotAvailableError(f"Failed to recover database client: {e}")
@@ -136,9 +142,7 @@ class PGGraphStorageSimple(BaseGraphStorage):
             elif not hasattr(self, "workspace") or not self.workspace:
                 self.workspace = "default"
 
-            logger.info(
-                f"[{self.workspace}] PGGraphStorageSimple initialized"
-            )
+            logger.info(f"[{self.workspace}] PGGraphStorageSimple initialized")
 
             # Create tables and indexes
             async with self._acquire_connection() as conn:
@@ -183,7 +187,9 @@ class PGGraphStorageSimple(BaseGraphStorage):
                 try:
                     sql = sql_file.read_text(encoding="utf-8")
                     await conn.execute(sql)
-                    logger.info(f"[{self.workspace}] Deployed stored procedure: {sql_file.name}")
+                    logger.info(
+                        f"[{self.workspace}] Deployed stored procedure: {sql_file.name}"
+                    )
                 except Exception as e:
                     logger.warning(
                         f"[{self.workspace}] Could not deploy {sql_file.name}: {e}"
@@ -256,6 +262,7 @@ class PGGraphStorageSimple(BaseGraphStorage):
         """
 
         import time as time_module
+
         upsert_start = time_module.perf_counter()
         async with self._acquire_connection() as conn:
             # Use executemany for batch insert
@@ -268,7 +275,9 @@ class PGGraphStorageSimple(BaseGraphStorage):
 
         # Invalidate cache
         self._node_count_cache = None
-        logger.info(f"[PERF] Graph upsert_nodes: {upsert_time:.1f}ms ({len(nodes)} nodes)")
+        logger.info(
+            f"[PERF] Graph upsert_nodes: {upsert_time:.1f}ms ({len(nodes)} nodes)"
+        )
 
     async def delete_node(self, node_id: str) -> None:
         """Delete a node and its connected edges."""
@@ -429,6 +438,7 @@ class PGGraphStorageSimple(BaseGraphStorage):
         """
 
         import time as time_module
+
         upsert_start = time_module.perf_counter()
         async with self._acquire_connection() as conn:
             # Normalize edge direction and prepare records
@@ -438,12 +448,19 @@ class PGGraphStorageSimple(BaseGraphStorage):
                 if source_id > target_id:
                     source_id, target_id = target_id, source_id
                 records.append(
-                    (self.workspace, source_id, target_id, json.dumps(edge_data, ensure_ascii=False))
+                    (
+                        self.workspace,
+                        source_id,
+                        target_id,
+                        json.dumps(edge_data, ensure_ascii=False),
+                    )
                 )
             await conn.executemany(query, records)
         upsert_time = (time_module.perf_counter() - upsert_start) * 1000
 
-        logger.info(f"[PERF] Graph upsert_edges: {upsert_time:.1f}ms ({len(edges)} edges)")
+        logger.info(
+            f"[PERF] Graph upsert_edges: {upsert_time:.1f}ms ({len(edges)} edges)"
+        )
 
     async def remove_edges(self, edges: list[tuple[str, str]]) -> None:
         """Delete multiple edges in a single SQL statement.
@@ -577,7 +594,9 @@ class PGGraphStorageSimple(BaseGraphStorage):
         for pair in pairs:
             src_id = pair["src"]
             tgt_id = pair["tgt"]
-            edge = found_edges.get((src_id, tgt_id)) or found_edges.get((tgt_id, src_id))
+            edge = found_edges.get((src_id, tgt_id)) or found_edges.get(
+                (tgt_id, src_id)
+            )
             if edge is not None:
                 result[(src_id, tgt_id)] = edge
         return result
@@ -634,6 +653,7 @@ class PGGraphStorageSimple(BaseGraphStorage):
     async def get_all_nodes(self) -> list[dict]:
         """Get all nodes in the graph."""
         import time as time_module
+
         start_time = time_module.perf_counter()
         query = """
             SELECT node_id, properties FROM LIGHTRAG_GRAPH_NODES
@@ -651,7 +671,9 @@ class PGGraphStorageSimple(BaseGraphStorage):
                 node_data["id"] = row["node_id"]
                 result.append(node_data)
         elapsed = (time_module.perf_counter() - start_time) * 1000
-        logger.info(f"[PERF] Graph get_all_nodes: {elapsed:.1f}ms ({len(result)} nodes)")
+        logger.info(
+            f"[PERF] Graph get_all_nodes: {elapsed:.1f}ms ({len(result)} nodes)"
+        )
         return result
 
     async def get_all_edges(self) -> list[dict]:
@@ -713,7 +735,10 @@ class PGGraphStorageSimple(BaseGraphStorage):
             )
         except Exception as e:
             error_msg = str(e)
-            if "lightrag_get_knowledge_graph" in error_msg and "does not exist" in error_msg:
+            if (
+                "lightrag_get_knowledge_graph" in error_msg
+                and "does not exist" in error_msg
+            ):
                 logger.debug(
                     f"[{self.workspace}] Stored procedure not available, using BFS fallback"
                 )
@@ -757,28 +782,36 @@ class PGGraphStorageSimple(BaseGraphStorage):
             nodes = []
             for n in data.get("nodes", []):
                 try:
-                    nodes.append(KnowledgeGraphNode(
-                        id=n.get("id", n.get("node_id", "")),
-                        labels=n.get("labels", [n.get("entity_type", "entity")]),
-                        properties=n.get("properties", {}),
-                    ))
+                    nodes.append(
+                        KnowledgeGraphNode(
+                            id=n.get("id", n.get("node_id", "")),
+                            labels=n.get("labels", [n.get("entity_type", "entity")]),
+                            properties=n.get("properties", {}),
+                        )
+                    )
                 except Exception as node_err:
-                    logger.warning(f"[{self.workspace}] Skipping invalid node: {node_err}")
+                    logger.warning(
+                        f"[{self.workspace}] Skipping invalid node: {node_err}"
+                    )
 
             edges = []
             for e in data.get("edges", []):
                 try:
                     source = e.get("source", e.get("source_id", ""))
                     target = e.get("target", e.get("target_id", ""))
-                    edges.append(KnowledgeGraphEdge(
-                        id=e.get("id", f"{source}-{target}"),
-                        type=e.get("type", e.get("relationship", "related_to")),
-                        source=source,
-                        target=target,
-                        properties=e.get("properties", {}),
-                    ))
+                    edges.append(
+                        KnowledgeGraphEdge(
+                            id=e.get("id", f"{source}-{target}"),
+                            type=e.get("type", e.get("relationship", "related_to")),
+                            source=source,
+                            target=target,
+                            properties=e.get("properties", {}),
+                        )
+                    )
                 except Exception as edge_err:
-                    logger.warning(f"[{self.workspace}] Skipping invalid edge: {edge_err}")
+                    logger.warning(
+                        f"[{self.workspace}] Skipping invalid edge: {edge_err}"
+                    )
 
             logger.debug(
                 f"[{self.workspace}] Stored proc returned {len(nodes)} nodes, "
@@ -821,7 +854,9 @@ class PGGraphStorageSimple(BaseGraphStorage):
                 ) e GROUP BY node_id
             """
             degree_rows = await conn.fetch(degree_query, self.workspace)
-            node_degrees: dict[str, int] = {row["node_id"]: row["degree"] for row in degree_rows}
+            node_degrees: dict[str, int] = {
+                row["node_id"]: row["degree"] for row in degree_rows
+            }
             logger.debug(
                 f"[GRAPH] Precomputed degrees for {len(node_degrees)} nodes, "
                 f"min_degree_filter={min_degree}"
@@ -926,16 +961,21 @@ class PGGraphStorageSimple(BaseGraphStorage):
                             # Fetch neighbor properties
                             neighbor_row = await conn.fetchrow(
                                 "SELECT properties FROM LIGHTRAG_GRAPH_NODES WHERE workspace = $1 AND node_id = $2",
-                                self.workspace, neighbor_id,
+                                self.workspace,
+                                neighbor_id,
                             )
                             if neighbor_row:
                                 n_props = neighbor_row["properties"]
                                 if isinstance(n_props, str):
                                     n_props = json.loads(n_props)
-                                n_entity_type = (n_props or {}).get("entity_type", "entity")
+                                n_entity_type = (n_props or {}).get(
+                                    "entity_type", "entity"
+                                )
                                 nodes_dict[neighbor_id] = KnowledgeGraphNode(
                                     id=neighbor_id,
-                                    labels=[n_entity_type] if n_entity_type else ["entity"],
+                                    labels=[n_entity_type]
+                                    if n_entity_type
+                                    else ["entity"],
                                     properties=n_props or {},
                                 )
 
@@ -962,7 +1002,9 @@ class PGGraphStorageSimple(BaseGraphStorage):
                     if isinstance(edge_props, str):
                         edge_props = json.loads(edge_props)
                     edge_type = (edge_props or {}).get("relationship", "related_to")
-                    edge_key = f"{min(source_id, target_id)}-{max(source_id, target_id)}"
+                    edge_key = (
+                        f"{min(source_id, target_id)}-{max(source_id, target_id)}"
+                    )
                     if edge_key not in edges_dict:
                         edges_dict[edge_key] = KnowledgeGraphEdge(
                             id=f"{source_id}-{target_id}",
@@ -1041,11 +1083,18 @@ class PGGraphStorageSimple(BaseGraphStorage):
                 # Result is JSONB, asyncpg returns it as dict or str
                 if isinstance(result, str):
                     return json.loads(result)
-                return dict(result) if result else {"status": "error", "message": "No result"}
+                return (
+                    dict(result)
+                    if result
+                    else {"status": "error", "message": "No result"}
+                )
         except Exception as e:
             # Stored procedure might not exist - fall back gracefully
             error_msg = str(e)
-            if "lightrag_consolidate_entity" in error_msg and "does not exist" in error_msg:
+            if (
+                "lightrag_consolidate_entity" in error_msg
+                and "does not exist" in error_msg
+            ):
                 logger.warning(
                     f"[{self.workspace}] Stored procedure not available, "
                     "consolidation will use fallback method"
@@ -1096,14 +1145,24 @@ class PGGraphStorageSimple(BaseGraphStorage):
                 # Check for batch-level error
                 if batch_result.get("status") == "error":
                     error_msg = batch_result.get("message", "Unknown error")
-                    if "lightrag_consolidate_entities_batch" in error_msg and "does not exist" in error_msg:
+                    if (
+                        "lightrag_consolidate_entities_batch" in error_msg
+                        and "does not exist" in error_msg
+                    ):
                         logger.warning(
                             f"[{self.workspace}] Batch stored procedure not available, "
                             "falling back to individual calls"
                         )
-                        return await self._consolidate_entities_fallback(consolidation_map)
-                    logger.error(f"[{self.workspace}] Batch consolidation error: {error_msg}")
-                    return {old: {"status": "error", "message": error_msg} for old in consolidation_map}
+                        return await self._consolidate_entities_fallback(
+                            consolidation_map
+                        )
+                    logger.error(
+                        f"[{self.workspace}] Batch consolidation error: {error_msg}"
+                    )
+                    return {
+                        old: {"status": "error", "message": error_msg}
+                        for old in consolidation_map
+                    }
 
                 # Convert results array to dict keyed by old_name
                 results = {}
@@ -1122,14 +1181,20 @@ class PGGraphStorageSimple(BaseGraphStorage):
 
         except Exception as e:
             error_msg = str(e)
-            if "lightrag_consolidate_entities_batch" in error_msg and "does not exist" in error_msg:
+            if (
+                "lightrag_consolidate_entities_batch" in error_msg
+                and "does not exist" in error_msg
+            ):
                 logger.warning(
                     f"[{self.workspace}] Batch stored procedure not available, "
                     "falling back to individual calls"
                 )
                 return await self._consolidate_entities_fallback(consolidation_map)
             logger.error(f"[{self.workspace}] Batch consolidation error: {e}")
-            return {old: {"status": "error", "message": error_msg} for old in consolidation_map}
+            return {
+                old: {"status": "error", "message": error_msg}
+                for old in consolidation_map
+            }
 
     async def _consolidate_entities_fallback(
         self, consolidation_map: dict[str, str]

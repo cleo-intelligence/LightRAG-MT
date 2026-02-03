@@ -32,7 +32,9 @@ DEFAULT_SUMMARY_CONTEXT_SIZE = 12000
 # Once an entity is summarized, new descriptions are accumulated in pending_descriptions
 # until pending_tokens exceeds this threshold, triggering a new summarization
 DEFAULT_ENABLE_ENTITY_MATURITY = True
-DEFAULT_PENDING_SUMMARIZE_THRESHOLD = 2000  # tokens threshold to trigger re-summarization
+DEFAULT_PENDING_SUMMARIZE_THRESHOLD = (
+    2000  # tokens threshold to trigger re-summarization
+)
 
 # Default entities to extract if ENTITY_TYPES is not specified in .env
 DEFAULT_ENTITY_TYPES = [
