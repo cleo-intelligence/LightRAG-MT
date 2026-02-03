@@ -240,7 +240,7 @@ services:
       - key: LIGHTRAG_ALLOW_DEFAULT_WORKSPACE
         value: "false"
       - key: LIGHTRAG_MAX_WORKSPACES_IN_POOL
-        value: "50"
+        value: "20"  # Lower for dev
 
       #############################
       # Storage Paths
@@ -382,13 +382,13 @@ services:
       - key: MAX_ASYNC
         value: "128"
       - key: MAX_PARALLEL_INSERT
-        value: "32"
+        value: "16"
       - key: MAX_GRAPH_NODES
-        value: "3000"
+        value: "1000"
       - key: MIN_DEGREE_FOR_GRAPH_BFS
         value: "2"
       - key: GRAPH_MAX_ASYNC_MULTIPLIER
-        value: "4"
+        value: "2"
       - key: CPU_YIELD_INTERVAL
         value: "50"
 

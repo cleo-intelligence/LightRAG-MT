@@ -215,11 +215,9 @@ class TestEntityResolver:
         """Test that only entities of the same type are merged."""
         resolver = EntityResolver(similarity_threshold=0.85)
 
-        # Note: dict keys must be unique, so we use distinct names
+        # Note: dict keys must be unique, so we use different entity names
         all_nodes = {
-            "Apple Corp": [
-                {"entity_type": "ORGANIZATION", "description": "Tech company"}
-            ],
+            "Apple Corp": [{"entity_type": "ORGANIZATION", "description": "Tech company"}],
             "Apple Fruit": [{"entity_type": "FRUIT", "description": "A fruit"}],
             "Apple Corp.": [
                 {"entity_type": "ORGANIZATION", "description": "Full name"}
@@ -1204,8 +1202,9 @@ class TestFalsePositivePrevention:
 
         # These are different entities - different context qualifiers
         _score = compute_entity_similarity(
-            "Clément Thomas Email", "Clément Thomas Email Secondaire"
-        )
+            "Clément Thomas Email",
+            "Clément Thomas Email Secondaire"
+        )  # Score computed for documentation/debugging, assertion below documents behavior
         # This is tricky - they share most tokens but "Secondaire" is important
         # With prefix matching, "Clément Thomas Email" is a prefix of the other
         # So they would match. This test documents current behavior.
