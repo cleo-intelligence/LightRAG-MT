@@ -2394,7 +2394,20 @@ def main():
     print(
         f"Starting Uvicorn server in single-process mode on {global_args.host}:{global_args.port}"
     )
-    uvicorn.run(**uvicorn_config)
+    try:
+        uvicorn.run(**uvicorn_config)
+    except Exception as e:
+        import traceback
+
+        print(f"FATAL: Uvicorn crashed with exception: {e}", flush=True)
+        traceback.print_exc()
+        sys.exit(1)
+    except SystemExit as e:
+        print(f"FATAL: SystemExit with code: {e.code}", flush=True)
+        raise
+    except BaseException as e:
+        print(f"FATAL: BaseException: {type(e).__name__}: {e}", flush=True)
+        raise
 
 
 if __name__ == "__main__":
