@@ -2245,7 +2245,10 @@ class LightRAG:
                                 "dedup_output_tokens": 0,
                             }
 
-                            # Update document status to failed
+                            # Update document status to failed with incremented retry_count
+                            existing_retry_count = status_doc.metadata.get(
+                                "retry_count", 0
+                            )
                             await self.doc_status.upsert(
                                 {
                                     doc_id: {
@@ -2263,6 +2266,7 @@ class LightRAG:
                                             "processing_start_time": processing_start_time,
                                             "processing_end_time": processing_end_time,
                                             "token_usage": partial_token_usage,
+                                            "retry_count": existing_retry_count + 1,
                                         },
                                     }
                                 }
@@ -2445,7 +2449,10 @@ class LightRAG:
                                     ),
                                 }
 
-                                # Update document status to failed
+                                # Update document status to failed with incremented retry_count
+                                existing_retry_count = status_doc.metadata.get(
+                                    "retry_count", 0
+                                )
                                 await self.doc_status.upsert(
                                     {
                                         doc_id: {
@@ -2461,6 +2468,7 @@ class LightRAG:
                                                 "processing_start_time": processing_start_time,
                                                 "processing_end_time": processing_end_time,
                                                 "token_usage": partial_token_usage,
+                                                "retry_count": existing_retry_count + 1,
                                             },
                                         }
                                     }
@@ -2707,11 +2715,13 @@ class LightRAG:
                     else:
                         partial_token_usage = {}
 
-                    # Mark document as failed with timing and partial token usage
+                    # Mark document as failed with timing, partial token usage, and incremented retry_count
                     error_msg = f"Processing failed: {str(e)}"
                     logger.error(
                         f"[{self.workspace}] Document {doc_id} failed: {error_msg}"
                     )
+                    existing_metadata = claimed_doc.get("metadata", {})
+                    existing_retry_count = existing_metadata.get("retry_count", 0)
                     await self.doc_status.upsert(
                         {
                             doc_id: {
@@ -2730,10 +2740,11 @@ class LightRAG:
                                 ),  # Preserve created_at
                                 "updated_at": datetime.now(timezone.utc).isoformat(),
                                 "metadata": {
-                                    **claimed_doc.get("metadata", {}),
+                                    **existing_metadata,
                                     "processing_start_time": processing_start_time,
                                     "processing_end_time": processing_end_time,
                                     "token_usage": partial_token_usage,
+                                    "retry_count": existing_retry_count + 1,
                                 },
                             }
                         }
