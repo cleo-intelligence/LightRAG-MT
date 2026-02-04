@@ -3844,6 +3844,206 @@ class PGDocStatusStorage(DocStatusStorage):
         result = await self.db.query(sql, [self.workspace], multirows=False)
         return result.get("cnt", 0) if result else 0
 
+    async def reclaim_stale_processing(
+        self,
+        stale_minutes: int = 30,
+        target_status: str = "pending",
+        workspace: str | None = None,
+    ) -> dict[str, Any]:
+        """Reclaim documents stuck in 'processing' status for too long.
+
+        When a worker crashes or a deadlock causes a transaction to fail without
+        proper cleanup, documents can be left in 'processing' status indefinitely.
+        This method finds and resets those orphaned documents.
+
+        Args:
+            stale_minutes: Minutes after which a processing document is considered stale.
+                          Default 30 minutes - adjust based on your max processing time.
+            target_status: Status to set for reclaimed documents ('pending' or 'failed').
+                          Default 'pending' to retry processing.
+            workspace: Specific workspace to reclaim from, or None for all workspaces.
+
+        Returns:
+            Dict with reclaim results:
+            {
+                "status": "ok",
+                "reclaimed_count": N,
+                "reclaimed_ids": ["doc1", "doc2", ...],
+                "stale_threshold_minutes": N
+            }
+        """
+        if target_status not in ("pending", "failed"):
+            return {
+                "status": "error",
+                "message": f"Invalid target_status: {target_status}. Must be 'pending' or 'failed'.",
+                "reclaimed_count": 0,
+                "reclaimed_ids": [],
+            }
+
+        try:
+            # Find and update stale processing documents in one query
+            # Use RETURNING to get the IDs of affected rows
+            if workspace:
+                sql = """
+                    UPDATE LIGHTRAG_DOC_STATUS
+                    SET status = $1,
+                        updated_at = NOW(),
+                        error_msg = COALESCE(error_msg, '') || ' [Reclaimed from stale processing after ' || $2 || ' minutes]'
+                    WHERE workspace = $3
+                      AND status = 'processing'
+                      AND updated_at < NOW() - INTERVAL '1 minute' * $2
+                    RETURNING id
+                """
+                params = [target_status, stale_minutes, workspace]
+            else:
+                sql = """
+                    UPDATE LIGHTRAG_DOC_STATUS
+                    SET status = $1,
+                        updated_at = NOW(),
+                        error_msg = COALESCE(error_msg, '') || ' [Reclaimed from stale processing after ' || $2 || ' minutes]'
+                    WHERE status = 'processing'
+                      AND updated_at < NOW() - INTERVAL '1 minute' * $2
+                    RETURNING id, workspace
+                """
+                params = [target_status, stale_minutes]
+
+            await self.db._ensure_pool()
+            assert self.db.pool is not None
+
+            async with self.db.pool.acquire() as conn:
+                rows = await conn.fetch(sql, *params)
+
+            reclaimed_ids = [row["id"] for row in rows]
+            reclaimed_count = len(reclaimed_ids)
+
+            if reclaimed_count > 0:
+                # Log workspaces affected if reclaiming across all
+                if not workspace and rows:
+                    workspaces_affected = set(row.get("workspace", "unknown") for row in rows)
+                    logger.warning(
+                        f"Reclaimed {reclaimed_count} stale processing documents "
+                        f"(>{stale_minutes}min) -> {target_status} in workspaces: {workspaces_affected}"
+                    )
+                else:
+                    logger.warning(
+                        f"[{workspace}] Reclaimed {reclaimed_count} stale processing documents "
+                        f"(>{stale_minutes}min) -> {target_status}"
+                    )
+
+            return {
+                "status": "ok",
+                "reclaimed_count": reclaimed_count,
+                "reclaimed_ids": reclaimed_ids[:100],  # Limit response size
+                "stale_threshold_minutes": stale_minutes,
+                "target_status": target_status,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to reclaim stale processing documents: {e}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "reclaimed_count": 0,
+                "reclaimed_ids": [],
+            }
+
+    async def reset_failed_documents(
+        self,
+        target_status: str = "pending",
+        workspace: str | None = None,
+    ) -> dict[str, Any]:
+        """Reset failed documents to a different status for retry.
+
+        Use this to retry processing of documents that failed due to
+        transient errors like deadlocks, timeouts, or API failures.
+
+        Args:
+            target_status: Status to set for reset documents ('pending' or 'preprocessed').
+                          Default 'pending' to retry from the beginning.
+            workspace: Specific workspace to reset, or None for all workspaces.
+
+        Returns:
+            Dict with reset results:
+            {
+                "status": "ok",
+                "reclaimed_count": N,
+                "reclaimed_ids": ["doc1", "doc2", ...],
+                "target_status": "pending"
+            }
+        """
+        if target_status not in ("pending", "preprocessed"):
+            return {
+                "status": "error",
+                "message": f"Invalid target_status: {target_status}. Must be 'pending' or 'preprocessed'.",
+                "reclaimed_count": 0,
+                "reclaimed_ids": [],
+            }
+
+        try:
+            # Reset failed documents, excluding duplicates (they can't be processed)
+            if workspace:
+                sql = """
+                    UPDATE LIGHTRAG_DOC_STATUS
+                    SET status = $1,
+                        updated_at = NOW(),
+                        error_msg = COALESCE(error_msg, '') || ' [Reset for retry]'
+                    WHERE workspace = $2
+                      AND status = 'failed'
+                      AND (metadata->>'is_duplicate' IS NULL
+                           OR metadata->>'is_duplicate' != 'true')
+                    RETURNING id
+                """
+                params = [target_status, workspace]
+            else:
+                sql = """
+                    UPDATE LIGHTRAG_DOC_STATUS
+                    SET status = $1,
+                        updated_at = NOW(),
+                        error_msg = COALESCE(error_msg, '') || ' [Reset for retry]'
+                    WHERE status = 'failed'
+                      AND (metadata->>'is_duplicate' IS NULL
+                           OR metadata->>'is_duplicate' != 'true')
+                    RETURNING id, workspace
+                """
+                params = [target_status]
+
+            await self.db._ensure_pool()
+            assert self.db.pool is not None
+
+            async with self.db.pool.acquire() as conn:
+                rows = await conn.fetch(sql, *params)
+
+            reclaimed_ids = [row["id"] for row in rows]
+            reclaimed_count = len(reclaimed_ids)
+
+            if reclaimed_count > 0:
+                if not workspace and rows:
+                    workspaces_affected = set(row.get("workspace", "unknown") for row in rows)
+                    logger.info(
+                        f"Reset {reclaimed_count} failed documents -> {target_status} "
+                        f"in workspaces: {workspaces_affected}"
+                    )
+                else:
+                    logger.info(
+                        f"[{workspace}] Reset {reclaimed_count} failed documents -> {target_status}"
+                    )
+
+            return {
+                "status": "ok",
+                "reclaimed_count": reclaimed_count,
+                "reclaimed_ids": reclaimed_ids[:100],  # Limit response size
+                "target_status": target_status,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to reset failed documents: {e}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "reclaimed_count": 0,
+                "reclaimed_ids": [],
+            }
+
     async def get_aggregated_metrics(
         self, workspace: str | None = None
     ) -> dict[str, Any]:

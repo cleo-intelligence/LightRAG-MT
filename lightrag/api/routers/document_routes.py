@@ -471,6 +471,89 @@ class ClearQueueResponse(BaseModel):
         }
 
 
+class ReclaimRequest(BaseModel):
+    """Request model for reclaiming stale/orphaned documents.
+
+    This is used to recover documents stuck in certain statuses
+    (e.g., 'processing' after a crash, or 'failed' after deadlocks).
+
+    Attributes:
+        source_status: Status to reclaim from ('processing', 'failed')
+        target_status: Status to set for reclaimed documents ('pending', 'failed')
+        stale_minutes: Minutes after which documents are considered stale (for processing status)
+        workspace: Optional specific workspace, or None for all workspaces
+    """
+
+    source_status: Literal["processing", "failed"] = Field(
+        default="processing",
+        description="Status to reclaim documents from",
+    )
+    target_status: Literal["pending", "failed"] = Field(
+        default="pending",
+        description="Status to set for reclaimed documents",
+    )
+    stale_minutes: int = Field(
+        default=30,
+        ge=1,
+        le=1440,
+        description="Minutes after which processing documents are considered stale (1-1440)",
+    )
+    workspace: Optional[str] = Field(
+        default=None,
+        description="Specific workspace to reclaim from, or null for all workspaces",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "source_status": "failed",
+                "target_status": "pending",
+                "stale_minutes": 30,
+                "workspace": None,
+            }
+        }
+
+
+class ReclaimResponse(BaseModel):
+    """Response model for document reclaim operation.
+
+    Attributes:
+        status: Operation status ('ok' or 'error')
+        message: Optional error message
+        reclaimed_count: Number of documents reclaimed
+        reclaimed_ids: Sample of reclaimed document IDs (max 100)
+        source_status: Status documents were reclaimed from
+        target_status: Status documents were set to
+        stale_threshold_minutes: Threshold used for stale detection
+    """
+
+    status: Literal["ok", "error"] = Field(description="Operation status")
+    message: Optional[str] = Field(default=None, description="Error message if any")
+    reclaimed_count: int = Field(description="Number of documents reclaimed")
+    reclaimed_ids: List[str] = Field(
+        default_factory=list,
+        description="Sample of reclaimed document IDs (max 100)",
+    )
+    source_status: str = Field(description="Status documents were reclaimed from")
+    target_status: str = Field(description="Status documents were set to")
+    stale_threshold_minutes: Optional[int] = Field(
+        default=None, description="Threshold used (for processing reclaim)"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "ok",
+                "message": None,
+                "reclaimed_count": 25,
+                "reclaimed_ids": ["doc1", "doc2", "doc3"],
+                "source_status": "failed",
+                "target_status": "pending",
+                "stale_threshold_minutes": None,
+            }
+        }
+
+
 """Response model for document status
 
 Attributes:
@@ -3811,6 +3894,91 @@ def create_document_routes(doc_manager: DocumentManager, api_key: Optional[str] 
 
         except Exception as e:
             logger.error(f"Error requesting pipeline cancellation: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post(
+        "/reclaim",
+        response_model=ReclaimResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def reclaim_documents(
+        request: ReclaimRequest,
+        rag: LightRAG = Depends(get_rag),
+    ):
+        """
+        Reclaim documents stuck in a certain status.
+
+        Use this endpoint to recover from:
+        - **Stale processing**: Documents stuck in 'processing' after a crash/deadlock
+        - **Failed documents**: Reset 'failed' documents to 'pending' for retry
+
+        For 'processing' status, only documents older than `stale_minutes` are reclaimed.
+        For 'failed' status, all failed documents are reset (stale_minutes is ignored).
+
+        Args:
+            request: ReclaimRequest with source_status, target_status, stale_minutes, workspace
+
+        Returns:
+            ReclaimResponse with count and sample of reclaimed document IDs
+        """
+        try:
+            if rag.doc_status is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Document status storage not available",
+                )
+
+            # Check if the doc_status has the reclaim methods
+            if not hasattr(rag.doc_status, "reclaim_stale_processing"):
+                raise HTTPException(
+                    status_code=501,
+                    detail="Reclaim not supported for this storage backend",
+                )
+
+            if request.source_status == "processing":
+                # Reclaim stale processing documents
+                result = await rag.doc_status.reclaim_stale_processing(
+                    stale_minutes=request.stale_minutes,
+                    target_status=request.target_status,
+                    workspace=request.workspace,
+                )
+                return ReclaimResponse(
+                    status=result.get("status", "error"),
+                    message=result.get("message"),
+                    reclaimed_count=result.get("reclaimed_count", 0),
+                    reclaimed_ids=result.get("reclaimed_ids", []),
+                    source_status="processing",
+                    target_status=request.target_status,
+                    stale_threshold_minutes=request.stale_minutes,
+                )
+
+            elif request.source_status == "failed":
+                # Reset all failed documents to target status
+                result = await rag.doc_status.reset_failed_documents(
+                    target_status=request.target_status,
+                    workspace=request.workspace,
+                )
+                return ReclaimResponse(
+                    status=result.get("status", "error"),
+                    message=result.get("message"),
+                    reclaimed_count=result.get("reclaimed_count", 0),
+                    reclaimed_ids=result.get("reclaimed_ids", []),
+                    source_status="failed",
+                    target_status=request.target_status,
+                    stale_threshold_minutes=None,
+                )
+
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid source_status: {request.source_status}",
+                )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error reclaiming documents: {str(e)}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 
