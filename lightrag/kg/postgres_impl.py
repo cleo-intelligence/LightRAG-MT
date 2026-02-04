@@ -13,6 +13,8 @@ import itertools
 
 from lightrag.types import KnowledgeGraph, KnowledgeGraphNode, KnowledgeGraphEdge
 
+import random
+
 from tenacity import (
     AsyncRetrying,
     RetryCallState,
@@ -114,7 +116,7 @@ class PostgreSQLDB:
             asyncpg.exceptions.SerializationError,
         )
 
-        # Connection retry configuration
+        # Connection retry configuration (for network/connection issues)
         self.connection_retry_attempts = config["connection_retry_attempts"]
         self.connection_retry_backoff = config["connection_retry_backoff"]
         self.connection_retry_backoff_max = max(
@@ -122,6 +124,19 @@ class PostgreSQLDB:
             config["connection_retry_backoff_max"],
         )
         self.pool_close_timeout = config["pool_close_timeout"]
+
+        # Deadlock retry configuration (short backoff with jitter for concurrent writes)
+        self.deadlock_retry_attempts = config.get("deadlock_retry_attempts", 10)
+        self.deadlock_retry_backoff = config.get("deadlock_retry_backoff", 0.1)
+        self.deadlock_retry_backoff_max = config.get("deadlock_retry_backoff_max", 5.0)
+        self.deadlock_retry_jitter = config.get("deadlock_retry_jitter", 0.1)
+
+        # Deadlock-specific exceptions (subset of transient exceptions)
+        self._deadlock_exceptions = (
+            asyncpg.exceptions.DeadlockDetectedError,
+            asyncpg.exceptions.SerializationError,
+        )
+
         logger.info(
             "PostgreSQL, Pool config: min_size=%s, max_size=%s, max_inactive_lifetime=%.0fs",
             self.min,
@@ -129,11 +144,18 @@ class PostgreSQLDB:
             self.max_inactive_connection_lifetime,
         )
         logger.info(
-            "PostgreSQL, Retry config: attempts=%s, backoff=%.1fs, backoff_max=%.1fs, pool_close_timeout=%.1fs",
+            "PostgreSQL, Connection retry config: attempts=%s, backoff=%.1fs, backoff_max=%.1fs, pool_close_timeout=%.1fs",
             self.connection_retry_attempts,
             self.connection_retry_backoff,
             self.connection_retry_backoff_max,
             self.pool_close_timeout,
+        )
+        logger.info(
+            "PostgreSQL, Deadlock retry config: attempts=%s, backoff=%.2fs, backoff_max=%.1fs, jitter=%.2fs",
+            self.deadlock_retry_attempts,
+            self.deadlock_retry_backoff,
+            self.deadlock_retry_backoff_max,
+            self.deadlock_retry_jitter,
         )
 
     def _create_ssl_context(self) -> ssl.SSLContext | None:
@@ -328,20 +350,16 @@ class PostgreSQLDB:
         exc = retry_state.outcome.exception() if retry_state.outcome else None
 
         # Check if this is a deadlock/serialization error (not a connection issue)
-        is_deadlock = isinstance(
-            exc,
-            (
-                asyncpg.exceptions.DeadlockDetectedError,
-                asyncpg.exceptions.SerializationError,
-            ),
-        )
+        is_deadlock = isinstance(exc, self._deadlock_exceptions)
 
         if is_deadlock:
             # Deadlock is a concurrency issue, not a connection issue - don't reset pool
+            wait_time = self._compute_wait_time(retry_state)
             logger.warning(
-                "PostgreSQL deadlock/serialization on attempt %s/%s (will retry): %r",
+                "PostgreSQL deadlock/serialization on attempt %s/%s (retry in %.3fs): %r",
                 retry_state.attempt_number,
-                self.connection_retry_attempts,
+                self.deadlock_retry_attempts,
+                wait_time,
                 exc,
             )
         else:
@@ -354,6 +372,35 @@ class PostgreSQLDB:
             )
             await self._reset_pool()
 
+    def _compute_wait_time(self, retry_state: RetryCallState) -> float:
+        """
+        Compute wait time based on exception type.
+
+        Deadlocks use short exponential backoff with jitter (100ms base).
+        Connection errors use longer exponential backoff (3s base).
+        """
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        attempt = retry_state.attempt_number
+
+        if isinstance(exc, self._deadlock_exceptions):
+            # Short backoff with jitter for deadlocks
+            # Formula: base * 2^(attempt-1) + random_jitter
+            base_delay = self.deadlock_retry_backoff * (2 ** (attempt - 1))
+            delay = min(base_delay, self.deadlock_retry_backoff_max)
+            jitter = random.uniform(0, self.deadlock_retry_jitter)
+            return delay + jitter
+        else:
+            # Longer backoff for connection errors
+            base_delay = self.connection_retry_backoff * (2 ** (attempt - 1))
+            return min(base_delay, self.connection_retry_backoff_max)
+
+    def _get_max_retry_attempts(self, retry_state: RetryCallState) -> int:
+        """Get max retry attempts based on exception type."""
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        if isinstance(exc, self._deadlock_exceptions):
+            return self.deadlock_retry_attempts
+        return self.connection_retry_attempts
+
     async def _run_with_retry(
         self,
         operation: Callable[[asyncpg.Connection], Awaitable[T]],
@@ -363,6 +410,10 @@ class PostgreSQLDB:
     ) -> T:
         """
         Execute a database operation with automatic retry for transient failures.
+
+        Uses different retry strategies based on exception type:
+        - Deadlocks: Short exponential backoff (100ms) with jitter, up to 10 retries
+        - Connection errors: Longer exponential backoff (3s), up to configured retries
 
         Args:
             operation: Async callable that receives an active connection.
@@ -375,24 +426,32 @@ class PostgreSQLDB:
         Raises:
             Exception: Propagates the last error if all retry attempts fail or a non-transient error occurs.
         """
-        wait_strategy = (
-            wait_exponential(
-                multiplier=self.connection_retry_backoff,
-                min=self.connection_retry_backoff,
-                max=self.connection_retry_backoff_max,
-            )
-            if self.connection_retry_backoff > 0
-            else wait_fixed(0)
+        # Use max of both retry limits since we'll check dynamically
+        max_attempts = max(
+            self.connection_retry_attempts, self.deadlock_retry_attempts
         )
 
         async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(self.connection_retry_attempts),
+            stop=stop_after_attempt(max_attempts),
             retry=retry_if_exception_type(self._transient_exceptions),
-            wait=wait_strategy,
+            wait=self._compute_wait_time,
             before_sleep=self._before_sleep,
             reraise=True,
         ):
             with attempt:
+                # Check if we've exceeded the appropriate limit for this exception type
+                if attempt.retry_state.attempt_number > 1:
+                    max_for_exc = self._get_max_retry_attempts(attempt.retry_state)
+                    if attempt.retry_state.attempt_number > max_for_exc:
+                        # We've exceeded the limit for this exception type
+                        exc = (
+                            attempt.retry_state.outcome.exception()
+                            if attempt.retry_state.outcome
+                            else None
+                        )
+                        if exc:
+                            raise exc
+
                 await self._ensure_pool()
                 assert self.pool is not None
                 async with self.pool.acquire() as connection:  # type: ignore[arg-type]
@@ -1828,6 +1887,31 @@ class ClientManager:
                         config.get("postgres", "pool_close_timeout", fallback=5.0),
                     )
                 ),
+            ),
+            # Deadlock retry configuration (short backoff with jitter for concurrent writes)
+            "deadlock_retry_attempts": int(
+                os.environ.get(
+                    "POSTGRES_DEADLOCK_RETRIES",
+                    config.get("postgres", "deadlock_retries", fallback=10),
+                )
+            ),
+            "deadlock_retry_backoff": float(
+                os.environ.get(
+                    "POSTGRES_DEADLOCK_RETRY_BACKOFF",
+                    config.get("postgres", "deadlock_retry_backoff", fallback=0.1),
+                )
+            ),
+            "deadlock_retry_backoff_max": float(
+                os.environ.get(
+                    "POSTGRES_DEADLOCK_RETRY_BACKOFF_MAX",
+                    config.get("postgres", "deadlock_retry_backoff_max", fallback=5.0),
+                )
+            ),
+            "deadlock_retry_jitter": float(
+                os.environ.get(
+                    "POSTGRES_DEADLOCK_RETRY_JITTER",
+                    config.get("postgres", "deadlock_retry_jitter", fallback=0.1),
+                )
             ),
         }
 
@@ -3759,6 +3843,206 @@ class PGDocStatusStorage(DocStatusStorage):
         """
         result = await self.db.query(sql, [self.workspace], multirows=False)
         return result.get("cnt", 0) if result else 0
+
+    async def reclaim_stale_processing(
+        self,
+        stale_minutes: int = 30,
+        target_status: str = "pending",
+        workspace: str | None = None,
+    ) -> dict[str, Any]:
+        """Reclaim documents stuck in 'processing' status for too long.
+
+        When a worker crashes or a deadlock causes a transaction to fail without
+        proper cleanup, documents can be left in 'processing' status indefinitely.
+        This method finds and resets those orphaned documents.
+
+        Args:
+            stale_minutes: Minutes after which a processing document is considered stale.
+                          Default 30 minutes - adjust based on your max processing time.
+            target_status: Status to set for reclaimed documents ('pending' or 'failed').
+                          Default 'pending' to retry processing.
+            workspace: Specific workspace to reclaim from, or None for all workspaces.
+
+        Returns:
+            Dict with reclaim results:
+            {
+                "status": "ok",
+                "reclaimed_count": N,
+                "reclaimed_ids": ["doc1", "doc2", ...],
+                "stale_threshold_minutes": N
+            }
+        """
+        if target_status not in ("pending", "failed"):
+            return {
+                "status": "error",
+                "message": f"Invalid target_status: {target_status}. Must be 'pending' or 'failed'.",
+                "reclaimed_count": 0,
+                "reclaimed_ids": [],
+            }
+
+        try:
+            # Find and update stale processing documents in one query
+            # Use RETURNING to get the IDs of affected rows
+            if workspace:
+                sql = """
+                    UPDATE LIGHTRAG_DOC_STATUS
+                    SET status = $1,
+                        updated_at = NOW(),
+                        error_msg = COALESCE(error_msg, '') || ' [Reclaimed from stale processing after ' || $2 || ' minutes]'
+                    WHERE workspace = $3
+                      AND status = 'processing'
+                      AND updated_at < NOW() - INTERVAL '1 minute' * $2
+                    RETURNING id
+                """
+                params = [target_status, stale_minutes, workspace]
+            else:
+                sql = """
+                    UPDATE LIGHTRAG_DOC_STATUS
+                    SET status = $1,
+                        updated_at = NOW(),
+                        error_msg = COALESCE(error_msg, '') || ' [Reclaimed from stale processing after ' || $2 || ' minutes]'
+                    WHERE status = 'processing'
+                      AND updated_at < NOW() - INTERVAL '1 minute' * $2
+                    RETURNING id, workspace
+                """
+                params = [target_status, stale_minutes]
+
+            await self.db._ensure_pool()
+            assert self.db.pool is not None
+
+            async with self.db.pool.acquire() as conn:
+                rows = await conn.fetch(sql, *params)
+
+            reclaimed_ids = [row["id"] for row in rows]
+            reclaimed_count = len(reclaimed_ids)
+
+            if reclaimed_count > 0:
+                # Log workspaces affected if reclaiming across all
+                if not workspace and rows:
+                    workspaces_affected = set(row.get("workspace", "unknown") for row in rows)
+                    logger.warning(
+                        f"Reclaimed {reclaimed_count} stale processing documents "
+                        f"(>{stale_minutes}min) -> {target_status} in workspaces: {workspaces_affected}"
+                    )
+                else:
+                    logger.warning(
+                        f"[{workspace}] Reclaimed {reclaimed_count} stale processing documents "
+                        f"(>{stale_minutes}min) -> {target_status}"
+                    )
+
+            return {
+                "status": "ok",
+                "reclaimed_count": reclaimed_count,
+                "reclaimed_ids": reclaimed_ids[:100],  # Limit response size
+                "stale_threshold_minutes": stale_minutes,
+                "target_status": target_status,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to reclaim stale processing documents: {e}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "reclaimed_count": 0,
+                "reclaimed_ids": [],
+            }
+
+    async def reset_failed_documents(
+        self,
+        target_status: str = "pending",
+        workspace: str | None = None,
+    ) -> dict[str, Any]:
+        """Reset failed documents to a different status for retry.
+
+        Use this to retry processing of documents that failed due to
+        transient errors like deadlocks, timeouts, or API failures.
+
+        Args:
+            target_status: Status to set for reset documents ('pending' or 'preprocessed').
+                          Default 'pending' to retry from the beginning.
+            workspace: Specific workspace to reset, or None for all workspaces.
+
+        Returns:
+            Dict with reset results:
+            {
+                "status": "ok",
+                "reclaimed_count": N,
+                "reclaimed_ids": ["doc1", "doc2", ...],
+                "target_status": "pending"
+            }
+        """
+        if target_status not in ("pending", "preprocessed"):
+            return {
+                "status": "error",
+                "message": f"Invalid target_status: {target_status}. Must be 'pending' or 'preprocessed'.",
+                "reclaimed_count": 0,
+                "reclaimed_ids": [],
+            }
+
+        try:
+            # Reset failed documents, excluding duplicates (they can't be processed)
+            if workspace:
+                sql = """
+                    UPDATE LIGHTRAG_DOC_STATUS
+                    SET status = $1,
+                        updated_at = NOW(),
+                        error_msg = COALESCE(error_msg, '') || ' [Reset for retry]'
+                    WHERE workspace = $2
+                      AND status = 'failed'
+                      AND (metadata->>'is_duplicate' IS NULL
+                           OR metadata->>'is_duplicate' != 'true')
+                    RETURNING id
+                """
+                params = [target_status, workspace]
+            else:
+                sql = """
+                    UPDATE LIGHTRAG_DOC_STATUS
+                    SET status = $1,
+                        updated_at = NOW(),
+                        error_msg = COALESCE(error_msg, '') || ' [Reset for retry]'
+                    WHERE status = 'failed'
+                      AND (metadata->>'is_duplicate' IS NULL
+                           OR metadata->>'is_duplicate' != 'true')
+                    RETURNING id, workspace
+                """
+                params = [target_status]
+
+            await self.db._ensure_pool()
+            assert self.db.pool is not None
+
+            async with self.db.pool.acquire() as conn:
+                rows = await conn.fetch(sql, *params)
+
+            reclaimed_ids = [row["id"] for row in rows]
+            reclaimed_count = len(reclaimed_ids)
+
+            if reclaimed_count > 0:
+                if not workspace and rows:
+                    workspaces_affected = set(row.get("workspace", "unknown") for row in rows)
+                    logger.info(
+                        f"Reset {reclaimed_count} failed documents -> {target_status} "
+                        f"in workspaces: {workspaces_affected}"
+                    )
+                else:
+                    logger.info(
+                        f"[{workspace}] Reset {reclaimed_count} failed documents -> {target_status}"
+                    )
+
+            return {
+                "status": "ok",
+                "reclaimed_count": reclaimed_count,
+                "reclaimed_ids": reclaimed_ids[:100],  # Limit response size
+                "target_status": target_status,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to reset failed documents: {e}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "reclaimed_count": 0,
+                "reclaimed_ids": [],
+            }
 
     async def get_aggregated_metrics(
         self, workspace: str | None = None
