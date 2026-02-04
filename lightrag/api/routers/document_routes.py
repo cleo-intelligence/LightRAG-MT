@@ -34,7 +34,7 @@ from lightrag.utils import (
 from lightrag.exceptions import PipelineNotInitializedError
 from lightrag.operate import rebuild_knowledge_from_chunks
 from lightrag.api.utils_api import get_combined_auth_dependency
-from lightrag.api.workspace_manager import get_rag, get_workspace_pool
+from lightrag.api.workspace_manager import get_rag, get_rag_for_admin, get_workspace_pool
 from ..config import global_args
 
 
@@ -3923,10 +3923,14 @@ def create_document_routes(doc_manager: DocumentManager, api_key: Optional[str] 
     )
     async def reclaim_documents(
         request: ReclaimRequest,
-        rag: LightRAG = Depends(get_rag),
+        rag: LightRAG = Depends(get_rag_for_admin),
     ):
         """
         Reclaim documents stuck in a certain status.
+
+        This endpoint does NOT require a workspace header - it operates across all
+        workspaces by default. Use the `workspace` field in the request body to
+        limit the operation to a specific workspace.
 
         Use this endpoint to recover from:
         - **Stale processing**: Documents stuck in 'processing' after a crash/deadlock
