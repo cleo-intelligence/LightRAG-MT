@@ -3947,6 +3947,49 @@ class PGDocStatusStorage(DocStatusStorage):
                 "reclaimed_ids": [],
             }
 
+    async def update_heartbeat(self, doc_id: str) -> bool:
+        """Update the heartbeat (updated_at) for a document being processed.
+
+        This prevents the document from being reclaimed by reclaim_stale_processing
+        while it's still actively being processed. Call this periodically during
+        long-running document processing to signal "I'm still alive".
+
+        Args:
+            doc_id: The document ID to update
+
+        Returns:
+            True if heartbeat was updated, False if document not found or not in processing
+        """
+        try:
+            sql = """
+                UPDATE LIGHTRAG_DOC_STATUS
+                SET updated_at = NOW()
+                WHERE workspace = $1
+                  AND id = $2
+                  AND status = 'processing'
+            """
+            await self.db._ensure_pool()
+            assert self.db.pool is not None
+
+            async with self.db.pool.acquire() as conn:
+                result = await conn.execute(sql, self.workspace, doc_id)
+                # Result format: "UPDATE N" where N is rows affected
+                rows_affected = int(result.split()[-1])
+
+            if rows_affected > 0:
+                logger.debug(f"[{self.workspace}] Heartbeat updated for {doc_id}")
+                return True
+            else:
+                logger.warning(
+                    f"[{self.workspace}] Heartbeat failed for {doc_id} "
+                    "(not found or not in processing status)"
+                )
+                return False
+
+        except Exception as e:
+            logger.error(f"[{self.workspace}] Failed to update heartbeat for {doc_id}: {e}")
+            return False
+
     async def reset_failed_documents(
         self,
         target_status: str = "pending",

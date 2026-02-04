@@ -2162,6 +2162,10 @@ class LightRAG:
                             # Execute first stage tasks
                             await asyncio.gather(*first_stage_tasks)
 
+                            # Send heartbeat after chunking to prevent stale detection during long processing
+                            if hasattr(self.doc_status, "update_heartbeat"):
+                                await self.doc_status.update_heartbeat(doc_id)
+
                             # Stage 2: Process entity relation graph (after text_chunks are saved)
                             entity_relation_task = asyncio.create_task(
                                 self._process_extract_entities(
@@ -2274,6 +2278,10 @@ class LightRAG:
 
                         # Concurrency is controlled by keyed lock for individual entities and relationships
                         if file_extraction_stage_ok:
+                            # Send heartbeat after extraction to prevent stale detection during merge phase
+                            if hasattr(self.doc_status, "update_heartbeat"):
+                                await self.doc_status.update_heartbeat(doc_id)
+
                             # Create separate token tracker for deduplication/merge phase
                             dedup_token_tracker = TokenTracker()
                             try:
@@ -2877,6 +2885,10 @@ class LightRAG:
             self.chunks_vdb.upsert(chunks),
         )
 
+        # Send heartbeat after chunking to prevent stale detection during long processing
+        if hasattr(self.doc_status, "update_heartbeat"):
+            await self.doc_status.update_heartbeat(doc_id)
+
         # Extract entities and relationships
         try:
             chunk_results = await self._process_extract_entities(
@@ -2887,6 +2899,10 @@ class LightRAG:
             )
         except Exception as e:
             raise Exception(f"Entity extraction failed: {str(e)}")
+
+        # Send heartbeat after extraction to prevent stale detection during merge phase
+        if hasattr(self.doc_status, "update_heartbeat"):
+            await self.doc_status.update_heartbeat(doc_id)
 
         # Check for cancellation before processing results
         async with pipeline_status_lock:
