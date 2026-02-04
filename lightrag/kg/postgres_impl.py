@@ -3951,6 +3951,7 @@ class PGDocStatusStorage(DocStatusStorage):
         self,
         target_status: str = "pending",
         workspace: str | None = None,
+        max_retry_count: int | None = None,
     ) -> dict[str, Any]:
         """Reset failed documents to a different status for retry.
 
@@ -3961,6 +3962,10 @@ class PGDocStatusStorage(DocStatusStorage):
             target_status: Status to set for reset documents ('pending' or 'preprocessed').
                           Default 'pending' to retry from the beginning.
             workspace: Specific workspace to reset, or None for all workspaces.
+            max_retry_count: Maximum retry_count to include in reset.
+                            Only documents with metadata.retry_count <= max_retry_count
+                            will be reset. Documents exceeding this threshold are
+                            considered permanently failed. Default None (no limit).
 
         Returns:
             Dict with reset results:
@@ -3968,7 +3973,8 @@ class PGDocStatusStorage(DocStatusStorage):
                 "status": "ok",
                 "reclaimed_count": N,
                 "reclaimed_ids": ["doc1", "doc2", ...],
-                "target_status": "pending"
+                "target_status": "pending",
+                "skipped_permanently_failed": M  # docs exceeding max_retry_count
             }
         """
         if target_status not in ("pending", "preprocessed"):
@@ -3980,32 +3986,69 @@ class PGDocStatusStorage(DocStatusStorage):
             }
 
         try:
+            # Build retry_count filter clause if max_retry_count is specified
+            # Documents without retry_count in metadata are treated as retry_count=0
+            retry_count_clause = ""
+            if max_retry_count is not None:
+                retry_count_clause = """
+                      AND (COALESCE((metadata->>'retry_count')::int, 0) <= $%d)
+                """
+
             # Reset failed documents, excluding duplicates (they can't be processed)
             if workspace:
-                sql = """
-                    UPDATE LIGHTRAG_DOC_STATUS
-                    SET status = $1,
-                        updated_at = NOW(),
-                        error_msg = COALESCE(error_msg, '') || ' [Reset for retry]'
-                    WHERE workspace = $2
-                      AND status = 'failed'
-                      AND (metadata->>'is_duplicate' IS NULL
-                           OR metadata->>'is_duplicate' != 'true')
-                    RETURNING id
-                """
-                params = [target_status, workspace]
+                if max_retry_count is not None:
+                    sql = f"""
+                        UPDATE LIGHTRAG_DOC_STATUS
+                        SET status = $1,
+                            updated_at = NOW(),
+                            error_msg = COALESCE(error_msg, '') || ' [Reset for retry]'
+                        WHERE workspace = $2
+                          AND status = 'failed'
+                          AND (metadata->>'is_duplicate' IS NULL
+                               OR metadata->>'is_duplicate' != 'true')
+                          AND (COALESCE((metadata->>'retry_count')::int, 0) <= $3)
+                        RETURNING id
+                    """
+                    params = [target_status, workspace, max_retry_count]
+                else:
+                    sql = """
+                        UPDATE LIGHTRAG_DOC_STATUS
+                        SET status = $1,
+                            updated_at = NOW(),
+                            error_msg = COALESCE(error_msg, '') || ' [Reset for retry]'
+                        WHERE workspace = $2
+                          AND status = 'failed'
+                          AND (metadata->>'is_duplicate' IS NULL
+                               OR metadata->>'is_duplicate' != 'true')
+                        RETURNING id
+                    """
+                    params = [target_status, workspace]
             else:
-                sql = """
-                    UPDATE LIGHTRAG_DOC_STATUS
-                    SET status = $1,
-                        updated_at = NOW(),
-                        error_msg = COALESCE(error_msg, '') || ' [Reset for retry]'
-                    WHERE status = 'failed'
-                      AND (metadata->>'is_duplicate' IS NULL
-                           OR metadata->>'is_duplicate' != 'true')
-                    RETURNING id, workspace
-                """
-                params = [target_status]
+                if max_retry_count is not None:
+                    sql = f"""
+                        UPDATE LIGHTRAG_DOC_STATUS
+                        SET status = $1,
+                            updated_at = NOW(),
+                            error_msg = COALESCE(error_msg, '') || ' [Reset for retry]'
+                        WHERE status = 'failed'
+                          AND (metadata->>'is_duplicate' IS NULL
+                               OR metadata->>'is_duplicate' != 'true')
+                          AND (COALESCE((metadata->>'retry_count')::int, 0) <= $2)
+                        RETURNING id, workspace
+                    """
+                    params = [target_status, max_retry_count]
+                else:
+                    sql = """
+                        UPDATE LIGHTRAG_DOC_STATUS
+                        SET status = $1,
+                            updated_at = NOW(),
+                            error_msg = COALESCE(error_msg, '') || ' [Reset for retry]'
+                        WHERE status = 'failed'
+                          AND (metadata->>'is_duplicate' IS NULL
+                               OR metadata->>'is_duplicate' != 'true')
+                        RETURNING id, workspace
+                    """
+                    params = [target_status]
 
             await self.db._ensure_pool()
             assert self.db.pool is not None
@@ -4016,16 +4059,37 @@ class PGDocStatusStorage(DocStatusStorage):
             reclaimed_ids = [row["id"] for row in rows]
             reclaimed_count = len(reclaimed_ids)
 
+            # Count permanently failed docs (those exceeding max_retry_count)
+            skipped_permanently_failed = 0
+            if max_retry_count is not None:
+                count_sql = """
+                    SELECT COUNT(*) as cnt FROM LIGHTRAG_DOC_STATUS
+                    WHERE status = 'failed'
+                      AND (metadata->>'is_duplicate' IS NULL
+                           OR metadata->>'is_duplicate' != 'true')
+                      AND (COALESCE((metadata->>'retry_count')::int, 0) > $1)
+                """
+                count_params = [max_retry_count]
+                if workspace:
+                    count_sql += " AND workspace = $2"
+                    count_params.append(workspace)
+
+                async with self.db.pool.acquire() as conn:
+                    count_row = await conn.fetchrow(count_sql, *count_params)
+                    skipped_permanently_failed = count_row["cnt"] if count_row else 0
+
             if reclaimed_count > 0:
+                retry_info = f" (max_retry_count={max_retry_count})" if max_retry_count is not None else ""
+                skip_info = f", {skipped_permanently_failed} permanently failed" if skipped_permanently_failed > 0 else ""
                 if not workspace and rows:
                     workspaces_affected = set(row.get("workspace", "unknown") for row in rows)
                     logger.info(
-                        f"Reset {reclaimed_count} failed documents -> {target_status} "
+                        f"Reset {reclaimed_count} failed documents -> {target_status}{retry_info}{skip_info} "
                         f"in workspaces: {workspaces_affected}"
                     )
                 else:
                     logger.info(
-                        f"[{workspace}] Reset {reclaimed_count} failed documents -> {target_status}"
+                        f"[{workspace}] Reset {reclaimed_count} failed documents -> {target_status}{retry_info}{skip_info}"
                     )
 
             return {
@@ -4033,6 +4097,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 "reclaimed_count": reclaimed_count,
                 "reclaimed_ids": reclaimed_ids[:100],  # Limit response size
                 "target_status": target_status,
+                "skipped_permanently_failed": skipped_permanently_failed,
             }
 
         except Exception as e:

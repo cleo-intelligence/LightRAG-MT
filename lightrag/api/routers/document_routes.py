@@ -482,6 +482,10 @@ class ReclaimRequest(BaseModel):
         target_status: Status to set for reclaimed documents ('pending', 'failed')
         stale_minutes: Minutes after which documents are considered stale (for processing status)
         workspace: Optional specific workspace, or None for all workspaces
+        max_retry_count: Maximum retry_count to include (for failed status).
+            Only failed documents with retry_count <= max_retry_count will be reset.
+            Documents exceeding this threshold are considered permanently failed.
+            Defaults to None (no limit, reset all failed documents).
     """
 
     source_status: Literal["processing", "failed"] = Field(
@@ -502,6 +506,14 @@ class ReclaimRequest(BaseModel):
         default=None,
         description="Specific workspace to reclaim from, or null for all workspaces",
     )
+    max_retry_count: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Maximum retry_count to include when resetting failed documents. "
+        "Only documents with retry_count <= max_retry_count will be reset. "
+        "Documents exceeding this threshold are considered permanently failed. "
+        "Defaults to null (no limit).",
+    )
 
     class Config:
         json_schema_extra = {
@@ -510,6 +522,7 @@ class ReclaimRequest(BaseModel):
                 "target_status": "pending",
                 "stale_minutes": 30,
                 "workspace": None,
+                "max_retry_count": 3,
             }
         }
 
@@ -525,6 +538,7 @@ class ReclaimResponse(BaseModel):
         source_status: Status documents were reclaimed from
         target_status: Status documents were set to
         stale_threshold_minutes: Threshold used for stale detection
+        skipped_permanently_failed: Count of documents skipped due to exceeding max_retry_count
     """
 
     status: Literal["ok", "error"] = Field(description="Operation status")
@@ -539,6 +553,10 @@ class ReclaimResponse(BaseModel):
     stale_threshold_minutes: Optional[int] = Field(
         default=None, description="Threshold used (for processing reclaim)"
     )
+    skipped_permanently_failed: Optional[int] = Field(
+        default=None,
+        description="Count of failed documents skipped due to exceeding max_retry_count",
+    )
 
     class Config:
         json_schema_extra = {
@@ -550,6 +568,7 @@ class ReclaimResponse(BaseModel):
                 "source_status": "failed",
                 "target_status": "pending",
                 "stale_threshold_minutes": None,
+                "skipped_permanently_failed": 5,
             }
         }
 
@@ -3954,10 +3973,11 @@ def create_document_routes(doc_manager: DocumentManager, api_key: Optional[str] 
                 )
 
             elif request.source_status == "failed":
-                # Reset all failed documents to target status
+                # Reset failed documents to target status (filtered by max_retry_count if provided)
                 result = await rag.doc_status.reset_failed_documents(
                     target_status=request.target_status,
                     workspace=request.workspace,
+                    max_retry_count=request.max_retry_count,
                 )
                 return ReclaimResponse(
                     status=result.get("status", "error"),
@@ -3967,6 +3987,7 @@ def create_document_routes(doc_manager: DocumentManager, api_key: Optional[str] 
                     source_status="failed",
                     target_status=request.target_status,
                     stale_threshold_minutes=None,
+                    skipped_permanently_failed=result.get("skipped_permanently_failed"),
                 )
 
             else:
