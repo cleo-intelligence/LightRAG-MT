@@ -5,7 +5,7 @@ from pathlib import Path
 import asyncio
 import json
 import json_repair
-from typing import Any, AsyncIterator, overload, Literal
+from typing import Any, AsyncIterator, overload, Literal, Callable, Awaitable
 from collections import Counter, defaultdict
 
 from lightrag.exceptions import (
@@ -3574,6 +3574,7 @@ async def merge_nodes_and_edges(
     current_file_number: int = 0,
     total_files: int = 0,
     file_path: str = "unknown_source",
+    heartbeat_callback: Callable[[], Awaitable[bool]] | None = None,
 ) -> None:
     """Two-phase merge: process all entities first, then all relationships
 
@@ -3599,7 +3600,25 @@ async def merge_nodes_and_edges(
         current_file_number: Current file number for logging
         total_files: Total files for logging
         file_path: File path for logging
+        heartbeat_callback: Optional async callback to update document heartbeat
     """
+    import time as time_module
+
+    # Heartbeat tracking: send heartbeat every 5 minutes to prevent stale detection
+    heartbeat_interval_seconds = global_config.get("heartbeat_interval_seconds", 300)
+    last_heartbeat_time = [time_module.time()]  # Mutable container for closure access
+
+    async def maybe_send_heartbeat():
+        """Send heartbeat if interval has elapsed."""
+        if heartbeat_callback:
+            current_time = time_module.time()
+            if current_time - last_heartbeat_time[0] >= heartbeat_interval_seconds:
+                try:
+                    await heartbeat_callback()
+                    last_heartbeat_time[0] = current_time
+                    logger.debug(f"Heartbeat sent during merge phase for doc {doc_id}")
+                except Exception as e:
+                    logger.warning(f"Heartbeat failed during merge: {e}")
 
     # Check for cancellation at the start of merge
     if pipeline_status is not None and pipeline_status_lock is not None:
@@ -3823,6 +3842,9 @@ async def merge_nodes_and_edges(
         f"[PERF] Phase 1 (entities): {(phase1_time - phase1_start) * 1000:.1f}ms ({total_entities_count} entities)"
     )
 
+    # Send heartbeat after Phase 1 to prevent stale detection during long merge
+    await maybe_send_heartbeat()
+
     # Batch VDB upsert for entities
     if entity_vdb and entity_vdb_batch:
         vdb_upsert_start = perf_time.perf_counter()
@@ -3966,6 +3988,9 @@ async def merge_nodes_and_edges(
     logger.info(
         f"[PERF] Phase 2 (relations): {(phase2_time - phase2_start) * 1000:.1f}ms ({total_relations_count} relations)"
     )
+
+    # Send heartbeat after Phase 2 to prevent stale detection during long merge
+    await maybe_send_heartbeat()
 
     # Batch VDB upsert for relationships
     if relationships_vdb and rel_vdb_batch:
