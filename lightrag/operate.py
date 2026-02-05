@@ -4078,6 +4078,9 @@ async def extract_entities(
     use_llm_func: callable = global_config["llm_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
     token_tracker = global_config.get("token_tracker")
+    heartbeat_callback = global_config.get("heartbeat_callback")
+    # Send heartbeat every N chunks to prevent stale detection during long extraction
+    heartbeat_interval = global_config.get("heartbeat_interval", 10)
 
     ordered_chunks = list(chunks.items())
     # add language and example number params to prompt
@@ -4277,6 +4280,13 @@ async def extract_entities(
             async with pipeline_status_lock:
                 pipeline_status["latest_message"] = log_message
                 pipeline_status["history_messages"].append(log_message)
+
+        # Send periodic heartbeat to prevent stale detection during long extraction
+        if heartbeat_callback and processed_chunks % heartbeat_interval == 0:
+            try:
+                await heartbeat_callback()
+            except Exception as e:
+                logger.warning(f"Heartbeat failed during extraction: {e}")
 
         # Return the extracted nodes and edges for centralized processing
         return maybe_nodes, maybe_edges

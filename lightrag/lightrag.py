@@ -1342,7 +1342,7 @@ class LightRAG:
 
             tasks = [
                 self.chunks_vdb.upsert(inserting_chunks),
-                self._process_extract_entities(inserting_chunks),
+                self._process_extract_entities(inserting_chunks, doc_id=doc_key),
                 self.full_docs.upsert(new_docs),
                 self.text_chunks.upsert(inserting_chunks),
             ]
@@ -2173,6 +2173,7 @@ class LightRAG:
                                     pipeline_status,
                                     pipeline_status_lock,
                                     token_tracker=token_tracker,
+                                    doc_id=doc_id,
                                 )
                             )
                             chunk_results = await entity_relation_task
@@ -2896,6 +2897,7 @@ class LightRAG:
                 pipeline_status=pipeline_status,
                 pipeline_status_lock=pipeline_status_lock,
                 token_tracker=token_tracker,
+                doc_id=doc_id,
             )
         except Exception as e:
             raise Exception(f"Entity extraction failed: {str(e)}")
@@ -3006,12 +3008,21 @@ class LightRAG:
         pipeline_status=None,
         pipeline_status_lock=None,
         token_tracker: TokenTracker = None,
+        doc_id: str = None,
     ) -> list:
         try:
             # Build global_config with token_tracker included
             config = asdict(self)
             if token_tracker is not None:
                 config["token_tracker"] = token_tracker
+
+            # Add heartbeat callback to prevent stale detection during long extraction
+            # The callback will be called periodically during chunk processing
+            if doc_id and hasattr(self.doc_status, "update_heartbeat"):
+                config["heartbeat_callback"] = lambda: self.doc_status.update_heartbeat(
+                    doc_id
+                )
+
             chunk_results = await extract_entities(
                 chunk,
                 global_config=config,
