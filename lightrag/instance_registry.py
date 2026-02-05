@@ -176,9 +176,12 @@ class InstanceRegistry:
         processing_count: int = 0,
         pipeline_busy: bool = False,
     ) -> None:
-        """Send a heartbeat update."""
+        """Send a heartbeat update.
+
+        If the instance was deleted (e.g., by watchdog), re-register automatically.
+        """
         async with self._acquire_connection() as conn:
-            await conn.execute(
+            result = await conn.execute(
                 """
                 UPDATE LIGHTRAG_INSTANCES
                 SET last_heartbeat = NOW(),
@@ -190,6 +193,18 @@ class InstanceRegistry:
                 processing_count,
                 pipeline_busy,
             )
+
+            # Check if UPDATE affected any rows (result is "UPDATE N")
+            rows_affected = int(result.split()[-1]) if result else 0
+
+            if rows_affected == 0:
+                # Instance was deleted (watchdog cleanup) - re-register
+                logger.warning(
+                    f"Instance {self.instance_id} not found in DB - re-registering"
+                )
+                self._unregistered = False  # Reset so register() works
+                self._was_draining = False  # Reset drain state
+                await self.register()
 
     async def check_drain_requested(self) -> tuple[bool, Optional[str]]:
         """Check if drain has been requested for this instance.
