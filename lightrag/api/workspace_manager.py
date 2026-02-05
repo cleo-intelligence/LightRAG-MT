@@ -206,6 +206,10 @@ class WorkspacePool:
             self._lru_order.remove(workspace_id)
         self._lru_order.append(workspace_id)
 
+    def list_active(self) -> list[str]:
+        """Return list of currently active workspace IDs in the pool."""
+        return list(self._instances.keys())
+
     async def finalize_all(self) -> None:
         """Finalize all workspace instances for graceful shutdown."""
         async with self._lock:
