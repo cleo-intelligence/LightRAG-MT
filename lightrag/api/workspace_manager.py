@@ -433,7 +433,8 @@ async def get_rag_for_admin(request: Request) -> object:
             )
 
     # No instances and no default - create a temporary admin workspace
-    admin_workspace = "__admin__"
+    # Note: must be a valid workspace ID (alphanumeric start)
+    admin_workspace = "admin-system"
     logger.info(f"Admin request creating temporary workspace: {admin_workspace}")
     try:
         return await pool.get(admin_workspace)
