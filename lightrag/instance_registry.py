@@ -100,8 +100,9 @@ class InstanceRegistry:
         self._drain_poll_task: Optional[asyncio.Task] = None
         self._running = False
         self._unregistered = False  # Track if already unregistered (for SIGTERM handling)
+        self._was_draining = False  # Track previous drain state for cancellation detection
 
-        # Callback for when drain is requested
+        # Callback for when drain status changes (requested or cancelled)
         self._on_drain_requested: Optional[callable] = None
 
     @asynccontextmanager
@@ -453,9 +454,24 @@ class InstanceRegistry:
             try:
                 drain_requested, drain_reason = await self.check_drain_requested()
 
-                if drain_requested and self._on_drain_requested:
-                    # Trigger callback (which should activate local drain mode)
-                    self._on_drain_requested(drain_requested, drain_reason)
+                # Detect state transitions
+                if drain_requested and not self._was_draining:
+                    # Transition: not draining -> draining
+                    logger.info(
+                        f"Drain requested for instance {self.instance_id}: {drain_reason}"
+                    )
+                    if self._on_drain_requested:
+                        self._on_drain_requested(True, drain_reason)
+                    self._was_draining = True
+
+                elif not drain_requested and self._was_draining:
+                    # Transition: draining -> not draining (drain cancelled)
+                    logger.info(
+                        f"Drain cancelled for instance {self.instance_id}"
+                    )
+                    if self._on_drain_requested:
+                        self._on_drain_requested(False, None)
+                    self._was_draining = False
 
             except Exception as e:
                 logger.warning(f"Drain poll error: {e}")
