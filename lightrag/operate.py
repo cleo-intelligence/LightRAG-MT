@@ -4080,7 +4080,7 @@ async def extract_entities(
     token_tracker = global_config.get("token_tracker")
     heartbeat_callback = global_config.get("heartbeat_callback")
     # Send heartbeat every N chunks to prevent stale detection during long extraction
-    heartbeat_interval = global_config.get("heartbeat_interval", 10)
+    heartbeat_interval = global_config.get("heartbeat_interval", 2)
 
     ordered_chunks = list(chunks.items())
     # add language and example number params to prompt
