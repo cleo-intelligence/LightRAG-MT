@@ -469,13 +469,16 @@ def create_app(args):
                     instance_registry = InstanceRegistry(db=pg_db)
                     await instance_registry.initialize()
 
-                    # Set callback to activate local drain mode when DB drain is requested
+                    # Set callback to handle drain mode changes (enable or cancel)
                     def on_drain_requested(drain_requested: bool, reason: str):
                         if drain_requested and not is_drain_mode_enabled():
                             set_drain_mode(
                                 enabled=True,
                                 reason=reason or "Coordinated drain request",
                             )
+                        elif not drain_requested and is_drain_mode_enabled():
+                            # Drain was cancelled - resume normal operation
+                            set_drain_mode(enabled=False)
 
                     instance_registry.set_drain_callback(on_drain_requested)
 
