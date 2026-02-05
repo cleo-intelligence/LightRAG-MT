@@ -381,13 +381,56 @@ def create_app(args):
 
         # SIGTERM handler for graceful shutdown
         _shutdown_event = asyncio.Event()  # Reserved for future use
+        _sigterm_handled = False  # Prevent re-entry
 
         def sigterm_handler(signum, frame):
-            """Handle SIGTERM signal for graceful shutdown."""
+            """Handle SIGTERM signal for graceful shutdown.
+
+            Order of operations (critical for Cleo autoscaler):
+            1. Set drain mode (stop accepting new work)
+            2. Unregister from lightrag_instances IMMEDIATELY
+               - This is CRITICAL: Cleo must not see this instance anymore
+            3. The finally block will then wait for pipelines to complete
+            """
+            nonlocal _sigterm_handled
+            if _sigterm_handled:
+                logger.debug("SIGTERM already handled - ignoring duplicate signal")
+                return
+            _sigterm_handled = True
+
             logger.info("SIGTERM received - initiating graceful shutdown...")
+
+            # Step 1: Enable drain mode immediately (stop accepting new work)
             set_drain_mode(enabled=True, reason="SIGTERM received - graceful shutdown")
-            # Signal the shutdown event (but don't block here)
-            # The actual waiting happens in the finally block
+
+            # Step 2: Unregister from database IMMEDIATELY
+            # This is critical for Cleo - the instance must disappear from
+            # lightrag_instances before we start waiting for pipelines
+            registry = get_instance_registry()
+            if registry is not None:
+                try:
+                    # Schedule async unregister on the event loop
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create a task to unregister (non-blocking)
+                        asyncio.create_task(_async_unregister_instance(registry))
+                    else:
+                        # Fallback: run synchronously if no loop
+                        loop.run_until_complete(registry.unregister())
+                    logger.info(
+                        f"Instance {registry.instance_id} unregistration scheduled"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to unregister instance on SIGTERM: {e}")
+                    # Continue shutdown anyway - Cleo has fallback cleanup
+
+        async def _async_unregister_instance(registry: InstanceRegistry):
+            """Async helper to unregister instance from database."""
+            try:
+                await registry.unregister()
+                logger.info(f"Instance {registry.instance_id} unregistered from DB")
+            except Exception as e:
+                logger.warning(f"Async unregister failed: {e}")
 
         # Register signal handler (only in main thread)
         try:

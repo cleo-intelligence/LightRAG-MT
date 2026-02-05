@@ -99,6 +99,7 @@ class InstanceRegistry:
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._drain_poll_task: Optional[asyncio.Task] = None
         self._running = False
+        self._unregistered = False  # Track if already unregistered (for SIGTERM handling)
 
         # Callback for when drain is requested
         self._on_drain_requested: Optional[callable] = None
@@ -150,13 +151,23 @@ class InstanceRegistry:
         logger.info(f"Instance registered: {self.instance_id} ({self.hostname})")
 
     async def unregister(self) -> None:
-        """Unregister this instance from the database."""
+        """Unregister this instance from the database.
+
+        Safe to call multiple times - will only unregister once.
+        This is important for SIGTERM handling where we unregister
+        immediately but stop_background_tasks may also try to unregister.
+        """
+        if self._unregistered:
+            logger.debug(f"Instance {self.instance_id} already unregistered - skipping")
+            return
+
         async with self._acquire_connection() as conn:
             await conn.execute(
                 "DELETE FROM LIGHTRAG_INSTANCES WHERE instance_id = $1",
                 self.instance_id,
             )
 
+        self._unregistered = True
         logger.info(f"Instance unregistered: {self.instance_id}")
 
     async def heartbeat(
