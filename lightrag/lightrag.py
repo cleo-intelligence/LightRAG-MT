@@ -2299,6 +2299,11 @@ class LightRAG:
                                 merge_config = asdict(self)
                                 merge_config["token_tracker"] = dedup_token_tracker
 
+                                # Create heartbeat callback for merge phase
+                                merge_heartbeat_callback = None
+                                if doc_id and hasattr(self.doc_status, "update_heartbeat"):
+                                    merge_heartbeat_callback = lambda doc=doc_id: self.doc_status.update_heartbeat(doc)
+
                                 # Use chunk_results from entity_relation_task
                                 await merge_nodes_and_edges(
                                     chunk_results=chunk_results,  # result collected from entity_relation_task
@@ -2317,6 +2322,7 @@ class LightRAG:
                                     current_file_number=current_file_number,
                                     total_files=total_files,
                                     file_path=file_path,
+                                    heartbeat_callback=merge_heartbeat_callback,
                                 )
 
                                 # Record processing end time
@@ -2920,6 +2926,11 @@ class LightRAG:
         merge_config = asdict(self)
         merge_config["token_tracker"] = dedup_token_tracker
 
+        # Create heartbeat callback for merge phase to prevent stale detection
+        merge_heartbeat_callback = None
+        if doc_id and hasattr(self.doc_status, "update_heartbeat"):
+            merge_heartbeat_callback = lambda doc=doc_id: self.doc_status.update_heartbeat(doc)
+
         # Use full merge_nodes_and_edges workflow (entity resolution, stored procedures, etc.)
         await merge_nodes_and_edges(
             chunk_results=chunk_results,
@@ -2938,6 +2949,7 @@ class LightRAG:
             current_file_number=1,
             total_files=1,
             file_path=file_path,
+            heartbeat_callback=merge_heartbeat_callback,
         )
 
         # Calculate processing time
