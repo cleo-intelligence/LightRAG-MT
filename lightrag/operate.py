@@ -3824,10 +3824,10 @@ async def merge_nodes_and_edges(
 
         if entity_errors:
             error_rate = len(entity_errors) / len(entity_tasks)
-            if error_rate > 0.5:
+            if error_rate > 0.75:
                 raise RuntimeError(
                     f"Entity merge failed: {len(entity_errors)}/{len(entity_tasks)} entities failed "
-                    f"(>{50}% threshold). First error: {entity_errors[0]}"
+                    f"(>{75}% threshold). First error: {entity_errors[0]}"
                 )
             logger.warning(
                 f"Partial entity merge: {len(entity_errors)}/{len(entity_tasks)} entities failed, "
@@ -3967,10 +3967,10 @@ async def merge_nodes_and_edges(
 
         if edge_errors:
             error_rate = len(edge_errors) / len(edge_tasks)
-            if error_rate > 0.5:
+            if error_rate > 0.75:
                 raise RuntimeError(
                     f"Relation merge failed: {len(edge_errors)}/{len(edge_tasks)} relations failed "
-                    f"(>{50}% threshold). First error: {edge_errors[0]}"
+                    f"(>{75}% threshold). First error: {edge_errors[0]}"
                 )
             logger.warning(
                 f"Partial relation merge: {len(edge_errors)}/{len(edge_tasks)} relations failed, "
