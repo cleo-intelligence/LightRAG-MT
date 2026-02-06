@@ -1712,14 +1712,16 @@ def is_any_pipeline_busy() -> dict:
         dict: {
             "busy": bool,  # True if any pipeline is busy
             "busy_workspaces": list[str],  # List of workspace IDs with active pipelines
+            "total_docs": int,  # Total documents being processed across all workspaces
         }
     """
     global _shared_dicts
 
     if _shared_dicts is None:
-        return {"busy": False, "busy_workspaces": []}
+        return {"busy": False, "busy_workspaces": [], "total_docs": 0}
 
     busy_workspaces = []
+    total_docs = 0
 
     # Iterate through all namespaces to find pipeline_status entries
     for namespace_key in list(_shared_dicts.keys()):
@@ -1737,6 +1739,7 @@ def is_any_pipeline_busy() -> dict:
                     else:
                         workspace_id = "(default)"
                     busy_workspaces.append(workspace_id)
+                    total_docs += pipeline_data.get("docs", 0)
             except Exception:
                 # Ignore errors accessing individual namespaces
                 pass
@@ -1744,6 +1747,7 @@ def is_any_pipeline_busy() -> dict:
     return {
         "busy": len(busy_workspaces) > 0,
         "busy_workspaces": busy_workspaces,
+        "total_docs": total_docs,
     }
 
 
