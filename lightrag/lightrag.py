@@ -2407,8 +2407,12 @@ class LightRAG:
                                         "edge_errors": merge_stats["edge_errors"],
                                         "total_entities": merge_stats["total_entities"],
                                         "total_edges": merge_stats["total_edges"],
-                                        "processed_entities": merge_stats["processed_entities"],
-                                        "processed_edges": merge_stats["processed_edges"],
+                                        "processed_entities": merge_stats[
+                                            "processed_entities"
+                                        ],
+                                        "processed_edges": merge_stats[
+                                            "processed_edges"
+                                        ],
                                     }
                                     logger.warning(
                                         f"Doc {doc_id} processed with partial merge: "

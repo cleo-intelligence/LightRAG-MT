@@ -3775,7 +3775,7 @@ async def merge_nodes_and_edges(
 
                     except Exception as e:
                         if attempt < max_retries:
-                            wait_time = min(2 ** attempt, 5)
+                            wait_time = min(2**attempt, 5)
                             logger.warning(
                                 f"Entity `{entity_name}` merge failed (attempt {attempt}/{max_retries}): {e} — retrying in {wait_time}s"
                             )
@@ -3790,7 +3790,9 @@ async def merge_nodes_and_edges(
                                 ):
                                     async with pipeline_status_lock:
                                         pipeline_status["latest_message"] = error_msg
-                                        pipeline_status["history_messages"].append(error_msg)
+                                        pipeline_status["history_messages"].append(
+                                            error_msg
+                                        )
                             except Exception:
                                 pass
                             raise create_prefixed_exception(
@@ -3914,7 +3916,7 @@ async def merge_nodes_and_edges(
 
                     except Exception as e:
                         if attempt < max_retries:
-                            wait_time = min(2 ** attempt, 5)
+                            wait_time = min(2**attempt, 5)
                             logger.warning(
                                 f"Relation {sorted_edge_key} merge failed (attempt {attempt}/{max_retries}): {e} — retrying in {wait_time}s"
                             )
@@ -3929,7 +3931,9 @@ async def merge_nodes_and_edges(
                                 ):
                                     async with pipeline_status_lock:
                                         pipeline_status["latest_message"] = error_msg
-                                        pipeline_status["history_messages"].append(error_msg)
+                                        pipeline_status["history_messages"].append(
+                                            error_msg
+                                        )
                             except Exception:
                                 pass
                             raise create_prefixed_exception(
