@@ -2745,7 +2745,15 @@ class LightRAG:
                                 "content_summary": claimed_doc.get("content_summary", ""),
                                 "content_length": claimed_doc.get("content_length", 0),
                                 "file_path": file_path,
+                                "track_id": claimed_doc.get(
+                                    "track_id"
+                                ),  # Preserve track_id
+                                "created_at": claimed_doc.get(
+                                    "created_at"
+                                ),  # Preserve created_at
+                                "updated_at": datetime.now(timezone.utc).isoformat(),
                                 "metadata": {
+                                    **claimed_doc.get("metadata", {}),
                                     "processing_start_time": processing_start_time,
                                     "processing_end_time": processing_end_time,
                                     "token_usage": partial_token_usage,
