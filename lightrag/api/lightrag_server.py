@@ -168,7 +168,7 @@ def _collect_instance_metrics() -> dict:
         "db_pool_idle": db_pool_idle,
         "db_pool_utilization": db_pool_utilization,
         "pipelines_busy": busy_pipeline_count,
-        "processing_count": len(pipeline_status.get("busy_workspaces", [])),
+        "processing_count": pipeline_status.get("total_docs", 0),
     }
 
 
@@ -672,6 +672,10 @@ def create_app(args):
             registry = get_instance_registry()
             if registry is not None:
                 try:
+                    # Set shutting_down FIRST to prevent heartbeat auto-recovery
+                    # from re-registering the instance after we unregister it
+                    registry._shutting_down = True
+
                     # Schedule async unregister on the event loop
                     loop = asyncio.get_event_loop()
                     if loop.is_running():

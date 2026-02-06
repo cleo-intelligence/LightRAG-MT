@@ -3751,46 +3751,53 @@ async def merge_nodes_and_edges(
             async with get_storage_keyed_lock(
                 [entity_name], namespace=namespace, enable_logging=False
             ):
-                try:
-                    logger.debug(f"Processing entity {entity_name}")
-                    entity_data, vdb_data = await _merge_nodes_then_upsert(
-                        entity_name,
-                        entities,
-                        knowledge_graph_inst,
-                        entity_vdb,
-                        global_config,
-                        pipeline_status,
-                        pipeline_status_lock,
-                        llm_response_cache,
-                        entity_chunks_storage,
-                        token_tracker=global_config.get("token_tracker"),
-                    )
-
-                    return entity_data, vdb_data
-
-                except Exception as e:
-                    error_msg = f"Error processing entity `{entity_name}`: {e}"
-                    logger.error(error_msg)
-
-                    # Try to update pipeline status, but don't let status update failure affect main exception
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
                     try:
-                        if (
-                            pipeline_status is not None
-                            and pipeline_status_lock is not None
-                        ):
-                            async with pipeline_status_lock:
-                                pipeline_status["latest_message"] = error_msg
-                                pipeline_status["history_messages"].append(error_msg)
-                    except Exception as status_error:
-                        logger.error(
-                            f"Failed to update pipeline status: {status_error}"
+                        logger.debug(f"Processing entity {entity_name}")
+                        entity_data, vdb_data = await _merge_nodes_then_upsert(
+                            entity_name,
+                            entities,
+                            knowledge_graph_inst,
+                            entity_vdb,
+                            global_config,
+                            pipeline_status,
+                            pipeline_status_lock,
+                            llm_response_cache,
+                            entity_chunks_storage,
+                            token_tracker=global_config.get("token_tracker"),
                         )
 
-                    # Re-raise the original exception with a prefix
-                    prefixed_exception = create_prefixed_exception(
-                        e, f"`{entity_name}`"
-                    )
-                    raise prefixed_exception from e
+                        return entity_data, vdb_data
+
+                    except PipelineCancelledException:
+                        raise  # Never retry user cancellation
+
+                    except Exception as e:
+                        if attempt < max_retries:
+                            wait_time = min(2**attempt, 5)
+                            logger.warning(
+                                f"Entity `{entity_name}` merge failed (attempt {attempt}/{max_retries}): {e} — retrying in {wait_time}s"
+                            )
+                            await asyncio.sleep(wait_time)
+                        else:
+                            error_msg = f"Entity `{entity_name}` merge failed after {max_retries} attempts: {e}"
+                            logger.error(error_msg)
+                            try:
+                                if (
+                                    pipeline_status is not None
+                                    and pipeline_status_lock is not None
+                                ):
+                                    async with pipeline_status_lock:
+                                        pipeline_status["latest_message"] = error_msg
+                                        pipeline_status["history_messages"].append(
+                                            error_msg
+                                        )
+                            except Exception:
+                                pass
+                            raise create_prefixed_exception(
+                                e, f"`{entity_name}`"
+                            ) from e
 
     # Create entity processing tasks
     entity_tasks = []
@@ -3798,44 +3805,36 @@ async def merge_nodes_and_edges(
         task = asyncio.create_task(_locked_process_entity_name(entity_name, entities))
         entity_tasks.append(task)
 
-    # Execute entity tasks with error handling
+    # Execute entity tasks with partial failure tolerance
     processed_entities = []
     entity_vdb_batch = {}  # Collect VDB data for batch upsert
+    entity_errors = []
     if entity_tasks:
-        done, pending = await asyncio.wait(
-            entity_tasks, return_when=asyncio.FIRST_EXCEPTION
-        )
+        results = await asyncio.gather(*entity_tasks, return_exceptions=True)
 
-        first_exception = None
-        processed_entities = []
-
-        for task in done:
-            try:
-                entity_data, vdb_data = task.result()
-            except BaseException as e:
-                if first_exception is None:
-                    first_exception = e
+        for result in results:
+            if isinstance(result, PipelineCancelledException):
+                raise result  # User cancellation: abort immediately
+            elif isinstance(result, BaseException):
+                entity_errors.append(result)
+                logger.warning(f"Entity merge error (will continue): {result}")
             else:
+                entity_data, vdb_data = result
                 processed_entities.append(entity_data)
                 if vdb_data:
                     entity_vdb_batch.update(vdb_data)
 
-        if pending:
-            for task in pending:
-                task.cancel()
-            pending_results = await asyncio.gather(*pending, return_exceptions=True)
-            for result in pending_results:
-                if isinstance(result, BaseException):
-                    if first_exception is None:
-                        first_exception = result
-                else:
-                    entity_data, vdb_data = result
-                    processed_entities.append(entity_data)
-                    if vdb_data:
-                        entity_vdb_batch.update(vdb_data)
-
-        if first_exception is not None:
-            raise first_exception
+        if entity_errors:
+            error_rate = len(entity_errors) / len(entity_tasks)
+            if error_rate > 0.75:
+                raise RuntimeError(
+                    f"Entity merge failed: {len(entity_errors)}/{len(entity_tasks)} entities failed "
+                    f"(>{75}% threshold). First error: {entity_errors[0]}"
+                )
+            logger.warning(
+                f"Partial entity merge: {len(entity_errors)}/{len(entity_tasks)} entities failed, "
+                f"continuing with {len(processed_entities)} successful"
+            )
 
     phase1_time = perf_time.perf_counter()
     logger.info(
@@ -3884,55 +3883,62 @@ async def merge_nodes_and_edges(
                 namespace=namespace,
                 enable_logging=False,
             ):
-                try:
-                    added_entities = []  # Track entities added during edge processing
-
-                    logger.debug(f"Processing relation {sorted_edge_key}")
-                    edge_data, rel_vdb_data = await _merge_edges_then_upsert(
-                        edge_key[0],
-                        edge_key[1],
-                        edges,
-                        knowledge_graph_inst,
-                        relationships_vdb,
-                        entity_vdb,
-                        global_config,
-                        pipeline_status,
-                        pipeline_status_lock,
-                        llm_response_cache,
-                        added_entities,  # Pass list to collect added entities
-                        relation_chunks_storage,
-                        entity_chunks_storage,  # Add entity_chunks_storage parameter
-                        token_tracker=global_config.get("token_tracker"),
-                    )
-
-                    if edge_data is None:
-                        return None, [], None
-
-                    return edge_data, added_entities, rel_vdb_data
-
-                except Exception as e:
-                    error_msg = f"Error processing relation `{sorted_edge_key}`: {e}"
-                    logger.error(error_msg)
-
-                    # Try to update pipeline status, but don't let status update failure affect main exception
+                max_retries = 3
+                for attempt in range(1, max_retries + 1):
                     try:
-                        if (
-                            pipeline_status is not None
-                            and pipeline_status_lock is not None
-                        ):
-                            async with pipeline_status_lock:
-                                pipeline_status["latest_message"] = error_msg
-                                pipeline_status["history_messages"].append(error_msg)
-                    except Exception as status_error:
-                        logger.error(
-                            f"Failed to update pipeline status: {status_error}"
+                        added_entities = []  # Track entities added during edge processing
+
+                        logger.debug(f"Processing relation {sorted_edge_key}")
+                        edge_data, rel_vdb_data = await _merge_edges_then_upsert(
+                            edge_key[0],
+                            edge_key[1],
+                            edges,
+                            knowledge_graph_inst,
+                            relationships_vdb,
+                            entity_vdb,
+                            global_config,
+                            pipeline_status,
+                            pipeline_status_lock,
+                            llm_response_cache,
+                            added_entities,  # Pass list to collect added entities
+                            relation_chunks_storage,
+                            entity_chunks_storage,  # Add entity_chunks_storage parameter
+                            token_tracker=global_config.get("token_tracker"),
                         )
 
-                    # Re-raise the original exception with a prefix
-                    prefixed_exception = create_prefixed_exception(
-                        e, f"{sorted_edge_key}"
-                    )
-                    raise prefixed_exception from e
+                        if edge_data is None:
+                            return None, [], None
+
+                        return edge_data, added_entities, rel_vdb_data
+
+                    except PipelineCancelledException:
+                        raise  # Never retry user cancellation
+
+                    except Exception as e:
+                        if attempt < max_retries:
+                            wait_time = min(2**attempt, 5)
+                            logger.warning(
+                                f"Relation {sorted_edge_key} merge failed (attempt {attempt}/{max_retries}): {e} — retrying in {wait_time}s"
+                            )
+                            await asyncio.sleep(wait_time)
+                        else:
+                            error_msg = f"Relation {sorted_edge_key} merge failed after {max_retries} attempts: {e}"
+                            logger.error(error_msg)
+                            try:
+                                if (
+                                    pipeline_status is not None
+                                    and pipeline_status_lock is not None
+                                ):
+                                    async with pipeline_status_lock:
+                                        pipeline_status["latest_message"] = error_msg
+                                        pipeline_status["history_messages"].append(
+                                            error_msg
+                                        )
+                            except Exception:
+                                pass
+                            raise create_prefixed_exception(
+                                e, f"{sorted_edge_key}"
+                            ) from e
 
     # Create relationship processing tasks
     edge_tasks = []
@@ -3945,44 +3951,35 @@ async def merge_nodes_and_edges(
     all_added_entities = []
     rel_vdb_batch = {}  # Collect VDB data for batch upsert
 
+    edge_errors = []
     if edge_tasks:
-        done, pending = await asyncio.wait(
-            edge_tasks, return_when=asyncio.FIRST_EXCEPTION
-        )
+        results = await asyncio.gather(*edge_tasks, return_exceptions=True)
 
-        first_exception = None
-
-        for task in done:
-            try:
-                edge_data, added_entities, rel_vdb_data = task.result()
-            except BaseException as e:
-                if first_exception is None:
-                    first_exception = e
+        for result in results:
+            if isinstance(result, PipelineCancelledException):
+                raise result  # User cancellation: abort immediately
+            elif isinstance(result, BaseException):
+                edge_errors.append(result)
+                logger.warning(f"Relation merge error (will continue): {result}")
             else:
+                edge_data, added_entities, rel_vdb_data = result
                 if edge_data is not None:
                     processed_edges.append(edge_data)
                 all_added_entities.extend(added_entities)
                 if rel_vdb_data:
                     rel_vdb_batch.update(rel_vdb_data)
 
-        if pending:
-            for task in pending:
-                task.cancel()
-            pending_results = await asyncio.gather(*pending, return_exceptions=True)
-            for result in pending_results:
-                if isinstance(result, BaseException):
-                    if first_exception is None:
-                        first_exception = result
-                else:
-                    edge_data, added_entities, rel_vdb_data = result
-                    if edge_data is not None:
-                        processed_edges.append(edge_data)
-                    all_added_entities.extend(added_entities)
-                    if rel_vdb_data:
-                        rel_vdb_batch.update(rel_vdb_data)
-
-        if first_exception is not None:
-            raise first_exception
+        if edge_errors:
+            error_rate = len(edge_errors) / len(edge_tasks)
+            if error_rate > 0.75:
+                raise RuntimeError(
+                    f"Relation merge failed: {len(edge_errors)}/{len(edge_tasks)} relations failed "
+                    f"(>{75}% threshold). First error: {edge_errors[0]}"
+                )
+            logger.warning(
+                f"Partial relation merge: {len(edge_errors)}/{len(edge_tasks)} relations failed, "
+                f"continuing with {len(processed_edges)} successful"
+            )
 
     phase2_time = perf_time.perf_counter()
     logger.info(
@@ -4078,10 +4075,21 @@ async def merge_nodes_and_edges(
     logger.info(f"[PERF] Total merge_nodes_and_edges: {total_merge_time * 1000:.1f}ms")
 
     log_message = f"Completed merging: {len(processed_entities)} entities, {len(all_added_entities)} extra entities, {len(processed_edges)} relations"
+    if entity_errors or edge_errors:
+        log_message += f" (partial: {len(entity_errors)} entity errors, {len(edge_errors)} relation errors)"
     logger.info(log_message)
     async with pipeline_status_lock:
         pipeline_status["latest_message"] = log_message
         pipeline_status["history_messages"].append(log_message)
+
+    return {
+        "entity_errors": len(entity_errors),
+        "edge_errors": len(edge_errors),
+        "total_entities": total_entities_count,
+        "total_edges": total_relations_count,
+        "processed_entities": len(processed_entities),
+        "processed_edges": len(processed_edges),
+    }
 
 
 async def extract_entities(

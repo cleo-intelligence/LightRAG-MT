@@ -2331,7 +2331,7 @@ class LightRAG:
                                         return self.doc_status.update_heartbeat(doc)
 
                                 # Use chunk_results from entity_relation_task
-                                await merge_nodes_and_edges(
+                                merge_stats = await merge_nodes_and_edges(
                                     chunk_results=chunk_results,  # result collected from entity_relation_task
                                     knowledge_graph_inst=self.chunk_entity_relation_graph,
                                     entity_vdb=self.entities_vdb,
@@ -2392,6 +2392,34 @@ class LightRAG:
                                         f"output={dedup_llm_usage.get('completion_tokens', 0)}"
                                     )
 
+                                # Build metadata with optional merge warnings
+                                doc_metadata = {
+                                    "processing_start_time": processing_start_time,
+                                    "processing_end_time": processing_end_time,
+                                    "token_usage": token_usage,
+                                }
+                                if merge_stats and (
+                                    merge_stats.get("entity_errors", 0) > 0
+                                    or merge_stats.get("edge_errors", 0) > 0
+                                ):
+                                    doc_metadata["merge_warnings"] = {
+                                        "entity_errors": merge_stats["entity_errors"],
+                                        "edge_errors": merge_stats["edge_errors"],
+                                        "total_entities": merge_stats["total_entities"],
+                                        "total_edges": merge_stats["total_edges"],
+                                        "processed_entities": merge_stats[
+                                            "processed_entities"
+                                        ],
+                                        "processed_edges": merge_stats[
+                                            "processed_edges"
+                                        ],
+                                    }
+                                    logger.warning(
+                                        f"Doc {doc_id} processed with partial merge: "
+                                        f"{merge_stats['entity_errors']}/{merge_stats['total_entities']} entity errors, "
+                                        f"{merge_stats['edge_errors']}/{merge_stats['total_edges']} edge errors"
+                                    )
+
                                 await self.doc_status.upsert(
                                     {
                                         doc_id: {
@@ -2406,11 +2434,7 @@ class LightRAG:
                                             ).isoformat(),
                                             "file_path": file_path,
                                             "track_id": status_doc.track_id,  # Preserve existing track_id
-                                            "metadata": {
-                                                "processing_start_time": processing_start_time,
-                                                "processing_end_time": processing_end_time,
-                                                "token_usage": token_usage,
-                                            },
+                                            "metadata": doc_metadata,
                                         }
                                     }
                                 )

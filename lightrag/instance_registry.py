@@ -104,6 +104,7 @@ class InstanceRegistry:
         self._unregistered = (
             False  # Track if already unregistered (for SIGTERM handling)
         )
+        self._shutting_down = False  # Set on SIGTERM to prevent heartbeat auto-recovery
         self._was_draining = (
             False  # Track previous drain state for cancellation detection
         )
@@ -220,6 +221,11 @@ class InstanceRegistry:
 
         # Re-register outside the connection context to avoid nested acquire
         if rows_affected == 0:
+            if self._shutting_down:
+                logger.info(
+                    f"Instance {self.instance_id} not found in DB during shutdown - skipping re-registration"
+                )
+                return
             logger.warning(
                 f"Instance {self.instance_id} not found in DB - re-registering"
             )
@@ -519,7 +525,7 @@ class InstanceRegistry:
 
     async def _heartbeat_loop(self) -> None:
         """Background task for sending heartbeats."""
-        while self._running:
+        while self._running and not self._shutting_down:
             try:
                 # Get current pipeline status
                 from .kg.shared_storage import is_any_pipeline_busy
@@ -535,7 +541,7 @@ class InstanceRegistry:
                         logger.warning(f"Metrics collector error: {e}")
 
                 await self.heartbeat(
-                    processing_count=len(pipeline_status.get("busy_workspaces", [])),
+                    processing_count=pipeline_status.get("total_docs", 0),
                     pipeline_busy=pipeline_status.get("busy", False),
                     metrics=instance_metrics,
                 )
@@ -550,7 +556,7 @@ class InstanceRegistry:
 
     async def _drain_poll_loop(self) -> None:
         """Background task for polling drain requests."""
-        while self._running:
+        while self._running and not self._shutting_down:
             try:
                 drain_requested, drain_reason = await self.check_drain_requested()
 
