@@ -19,6 +19,7 @@ Architecture:
 """
 
 import asyncio
+import json
 import os
 import socket
 from contextlib import asynccontextmanager
@@ -37,7 +38,8 @@ INSTANCE_REGISTRY_TABLE = {
             drain_requested BOOLEAN DEFAULT FALSE,
             drain_reason VARCHAR(255),
             processing_count INT DEFAULT 0,
-            pipeline_busy BOOLEAN DEFAULT FALSE
+            pipeline_busy BOOLEAN DEFAULT FALSE,
+            metrics JSONB DEFAULT '{}'::jsonb
         )""",
         "indexes": [
             "CREATE INDEX IF NOT EXISTS idx_instances_heartbeat ON LIGHTRAG_INSTANCES(last_heartbeat)",
@@ -109,6 +111,9 @@ class InstanceRegistry:
         # Callback for when drain status changes (requested or cancelled)
         self._on_drain_requested: Optional[callable] = None
 
+        # Callback to collect current instance metrics for heartbeat
+        self._metrics_collector: Optional[callable] = None
+
     @asynccontextmanager
     async def _acquire_connection(self):
         """Safely acquire a connection, ensuring pool is available.
@@ -124,6 +129,15 @@ class InstanceRegistry:
         async with self._acquire_connection() as conn:
             # Create table
             await conn.execute(INSTANCE_REGISTRY_TABLE["LIGHTRAG_INSTANCES"]["ddl"])
+
+            # Migration: add metrics JSONB column for existing deployments
+            try:
+                await conn.execute(
+                    "ALTER TABLE LIGHTRAG_INSTANCES "
+                    "ADD COLUMN IF NOT EXISTS metrics JSONB DEFAULT '{}'::jsonb"
+                )
+            except Exception as e:
+                logger.debug(f"Metrics column migration note: {e}")
 
             # Create indexes
             for index_sql in INSTANCE_REGISTRY_TABLE["LIGHTRAG_INSTANCES"]["indexes"]:
@@ -179,6 +193,7 @@ class InstanceRegistry:
         self,
         processing_count: int = 0,
         pipeline_busy: bool = False,
+        metrics: dict | None = None,
     ) -> None:
         """Send a heartbeat update.
 
@@ -190,12 +205,14 @@ class InstanceRegistry:
                 UPDATE LIGHTRAG_INSTANCES
                 SET last_heartbeat = NOW(),
                     processing_count = $2,
-                    pipeline_busy = $3
+                    pipeline_busy = $3,
+                    metrics = $4::jsonb
                 WHERE instance_id = $1
                 """,
                 self.instance_id,
                 processing_count,
                 pipeline_busy,
+                json.dumps(metrics) if metrics else "{}",
             )
 
             # Check if UPDATE affected any rows (result is "UPDATE N")
@@ -343,6 +360,53 @@ class InstanceRegistry:
                 for row in rows
             ]
 
+    async def get_all_instances_with_metrics(self) -> list[dict[str, Any]]:
+        """Get all alive instances with their metrics snapshots.
+
+        Returns instances that have sent a heartbeat within the last 5 minutes,
+        along with their most recent metrics JSONB snapshot.
+        """
+        async with self._acquire_connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    instance_id,
+                    hostname,
+                    last_heartbeat,
+                    drain_requested,
+                    processing_count,
+                    pipeline_busy,
+                    metrics
+                FROM LIGHTRAG_INSTANCES
+                WHERE last_heartbeat > NOW() - INTERVAL '5 minutes'
+                ORDER BY started_at ASC
+                """
+            )
+
+            result = []
+            for row in rows:
+                metrics_data = row["metrics"]
+                if isinstance(metrics_data, str):
+                    metrics_data = json.loads(metrics_data)
+                elif metrics_data is None:
+                    metrics_data = {}
+
+                result.append(
+                    {
+                        "instance_id": row["instance_id"],
+                        "hostname": row["hostname"],
+                        "last_heartbeat": row["last_heartbeat"].isoformat()
+                        if row["last_heartbeat"]
+                        else None,
+                        "drain_requested": row["drain_requested"],
+                        "processing_count": row["processing_count"],
+                        "pipeline_busy": row["pipeline_busy"],
+                        "metrics": metrics_data,
+                    }
+                )
+
+            return result
+
     async def get_drain_status(self) -> dict[str, Any]:
         """Get aggregated drain status for autoscaling decisions."""
         instances = await self.get_all_instances()
@@ -399,6 +463,14 @@ class InstanceRegistry:
         """
         self._on_drain_requested = callback
 
+    def set_metrics_collector(self, collector: callable) -> None:
+        """Set callback to collect instance metrics for heartbeat.
+
+        The callback should accept no arguments and return a dict of metrics.
+        Called every heartbeat cycle (~30s) to snapshot metrics into PostgreSQL.
+        """
+        self._metrics_collector = collector
+
     async def start_background_tasks(self) -> None:
         """Start heartbeat and drain polling background tasks."""
         if self._running:
@@ -454,9 +526,18 @@ class InstanceRegistry:
 
                 pipeline_status = is_any_pipeline_busy()
 
+                # Collect instance metrics if collector is set
+                instance_metrics = None
+                if self._metrics_collector is not None:
+                    try:
+                        instance_metrics = self._metrics_collector()
+                    except Exception as e:
+                        logger.warning(f"Metrics collector error: {e}")
+
                 await self.heartbeat(
                     processing_count=len(pipeline_status.get("busy_workspaces", [])),
                     pipeline_busy=pipeline_status.get("busy", False),
+                    metrics=instance_metrics,
                 )
 
                 # Also cleanup dead instances occasionally

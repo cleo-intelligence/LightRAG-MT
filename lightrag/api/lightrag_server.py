@@ -14,6 +14,7 @@ import logging
 import logging.config
 import sys
 import signal
+import socket
 import asyncio
 import time as _time
 import uvicorn
@@ -125,6 +126,50 @@ def _update_metrics_cache(updates: dict) -> None:
     _metrics_cache["last_updated"] = _time.monotonic()
     _metrics_cache["populated"] = True
     _metrics_cache["last_error"] = None
+
+
+def _collect_instance_metrics() -> dict:
+    """Collect current in-memory metrics for this instance.
+
+    Called by the heartbeat loop to snapshot local metrics into PostgreSQL.
+    These metrics are NOT available from other instances and must be
+    published via DB for /metrics/all aggregation.
+    """
+    from lightrag.kg.shared_storage import is_any_pipeline_busy, is_drain_mode_enabled
+
+    # LLM metrics (in-memory singleton)
+    llm_metrics = get_llm_metrics().get_metrics()
+
+    # Pipeline status
+    pipeline_status = is_any_pipeline_busy()
+    busy_pipeline_count = len(pipeline_status.get("busy_workspaces", []))
+
+    # DB pool metrics from cache (already collected by background task)
+    cache = _get_metrics_cache()
+    db_pool_size = cache.get("db_pool_size", 0)
+    db_pool_idle = cache.get("db_pool_idle", 0)
+    db_pool_max = cache.get("db_pool_max", 0)
+    db_pool_active = db_pool_size - db_pool_idle
+    db_pool_utilization = (
+        round(db_pool_active / db_pool_max * 100, 1) if db_pool_max > 0 else 0.0
+    )
+
+    return {
+        "llm_active_calls": llm_metrics["active_calls"],
+        "llm_total_calls": llm_metrics["total_calls"],
+        "llm_errors_total": llm_metrics["total_errors"],
+        "llm_latency_avg_ms": llm_metrics["avg_latency_ms"],
+        "llm_queue_size": llm_metrics["queue_size"],
+        "llm_max_concurrent": llm_metrics["max_concurrent"],
+        "asyncio_tasks_total": len(asyncio.all_tasks()),
+        "drain_mode": is_drain_mode_enabled(),
+        "db_pool_size": db_pool_size,
+        "db_pool_active": db_pool_active,
+        "db_pool_idle": db_pool_idle,
+        "db_pool_utilization": db_pool_utilization,
+        "pipelines_busy": busy_pipeline_count,
+        "processing_count": len(pipeline_status.get("busy_workspaces", [])),
+    }
 
 
 async def _metrics_collector_loop() -> None:
@@ -699,6 +744,9 @@ def create_app(args):
                             set_drain_mode(enabled=False)
 
                     instance_registry.set_drain_callback(on_drain_requested)
+
+                    # Register metrics collector for heartbeat-based publishing
+                    instance_registry.set_metrics_collector(_collect_instance_metrics)
 
                     # Start background tasks (heartbeat + drain polling)
                     await instance_registry.start_background_tasks()
@@ -2333,6 +2381,99 @@ def create_app(args):
             content="\n".join(metrics_lines),
             media_type="text/plain; version=0.0.4; charset=utf-8",
         )
+
+    @app.get(
+        "/metrics/all",
+        summary="Aggregated metrics from all instances",
+        description=(
+            "Returns per-instance metrics and aggregated totals across all "
+            "active LightRAG instances. Metrics are snapshotted into PostgreSQL "
+            "during each instance's heartbeat (~30s). Requires PostgreSQL and "
+            "instance registry to be enabled."
+        ),
+    )
+    async def get_metrics_all():
+        """Aggregated metrics from all active instances."""
+        registry = get_instance_registry()
+
+        if registry is None:
+            # No registry = single-instance mode, return local metrics only
+            local_metrics = _collect_instance_metrics()
+            return {
+                "instances": [
+                    {
+                        "instance_id": "local",
+                        "hostname": socket.gethostname(),
+                        "metrics": local_metrics,
+                    }
+                ],
+                "aggregated": {
+                    "total_llm_active_calls": local_metrics["llm_active_calls"],
+                    "total_processing_count": local_metrics["processing_count"],
+                    "total_db_pool_active": local_metrics["db_pool_active"],
+                    "total_pipelines_busy": local_metrics["pipelines_busy"],
+                },
+                "instance_count": 1,
+                "registry_enabled": False,
+            }
+
+        try:
+            instances = await registry.get_all_instances_with_metrics()
+        except Exception as e:
+            logger.warning(f"/metrics/all: registry query failed: {e}")
+            local_metrics = _collect_instance_metrics()
+            return {
+                "instances": [
+                    {
+                        "instance_id": registry.instance_id,
+                        "hostname": registry.hostname,
+                        "metrics": local_metrics,
+                    }
+                ],
+                "aggregated": {
+                    "total_llm_active_calls": local_metrics["llm_active_calls"],
+                    "total_processing_count": local_metrics["processing_count"],
+                    "total_db_pool_active": local_metrics["db_pool_active"],
+                    "total_pipelines_busy": local_metrics["pipelines_busy"],
+                },
+                "instance_count": 1,
+                "registry_enabled": True,
+                "error": str(e),
+            }
+
+        # Build per-instance response
+        instance_list = [
+            {
+                "instance_id": inst["instance_id"],
+                "hostname": inst["hostname"],
+                "metrics": inst["metrics"],
+            }
+            for inst in instances
+        ]
+
+        # Compute aggregated totals
+        aggregated = {
+            "total_llm_active_calls": sum(
+                inst["metrics"].get("llm_active_calls", 0) for inst in instances
+            ),
+            "total_processing_count": sum(
+                inst["metrics"].get("processing_count", 0) for inst in instances
+            ),
+            "total_db_pool_active": sum(
+                inst["metrics"].get("db_pool_active", 0) for inst in instances
+            ),
+            "total_pipelines_busy": sum(
+                inst["metrics"].get("pipelines_busy", 0) for inst in instances
+            ),
+        }
+
+        return {
+            "instances": instance_list,
+            "aggregated": aggregated,
+            "instance_count": len(instance_list),
+            "registry_enabled": True,
+            "this_instance": registry.instance_id,
+        }
 
     # Custom StaticFiles class for smart caching
     class SmartStaticFiles(StaticFiles):  # Renamed from NoCacheStaticFiles
