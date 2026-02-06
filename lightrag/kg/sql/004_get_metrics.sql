@@ -11,10 +11,12 @@ CREATE OR REPLACE FUNCTION lightrag_get_metrics(
 ) RETURNS JSONB AS $$
 DECLARE
     v_doc_stats JSONB;
+    v_queue_depth INT;
     v_graph_stats JSONB;
     v_workspace_count INT;
 BEGIN
     -- Document status metrics (single aggregated query)
+    -- Counts ALL documents including duplicates for visibility
     SELECT jsonb_build_object(
         'pending', COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0),
         'processing', COALESCE(SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END), 0),
@@ -25,6 +27,15 @@ BEGIN
     INTO v_doc_stats
     FROM LIGHTRAG_DOC_STATUS
     WHERE p_workspace IS NULL OR workspace = p_workspace;
+
+    -- Queue depth: pending + failed documents EXCLUDING duplicates
+    -- Duplicates are not processable (they have no content in full_docs)
+    SELECT COALESCE(COUNT(*), 0)
+    INTO v_queue_depth
+    FROM LIGHTRAG_DOC_STATUS
+    WHERE (p_workspace IS NULL OR workspace = p_workspace)
+      AND status IN ('pending', 'failed')
+      AND (metadata->>'is_duplicate' IS NULL OR metadata->>'is_duplicate' != 'true');
 
     -- Graph metrics (nodes and edges)
     SELECT jsonb_build_object(
@@ -52,7 +63,7 @@ BEGIN
         'documents', v_doc_stats,
         'graph', v_graph_stats,
         'workspace_count', v_workspace_count,
-        'queue_depth', (v_doc_stats->>'pending')::int + (v_doc_stats->>'failed')::int
+        'queue_depth', v_queue_depth
     );
 END;
 $$ LANGUAGE plpgsql;
