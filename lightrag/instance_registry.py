@@ -104,9 +104,7 @@ class InstanceRegistry:
         self._unregistered = (
             False  # Track if already unregistered (for SIGTERM handling)
         )
-        self._shutting_down = (
-            False  # Set on SIGTERM to prevent heartbeat auto-recovery
-        )
+        self._shutting_down = False  # Set on SIGTERM to prevent heartbeat auto-recovery
         self._was_draining = (
             False  # Track previous drain state for cancellation detection
         )
