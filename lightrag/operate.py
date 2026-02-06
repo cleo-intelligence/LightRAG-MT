@@ -5,7 +5,7 @@ from pathlib import Path
 import asyncio
 import json
 import json_repair
-from typing import Any, AsyncIterator, overload, Literal
+from typing import Any, AsyncIterator, overload, Literal, Callable, Awaitable
 from collections import Counter, defaultdict
 
 from lightrag.exceptions import (
@@ -3574,6 +3574,7 @@ async def merge_nodes_and_edges(
     current_file_number: int = 0,
     total_files: int = 0,
     file_path: str = "unknown_source",
+    heartbeat_callback: Callable[[], Awaitable[bool]] | None = None,
 ) -> None:
     """Two-phase merge: process all entities first, then all relationships
 
@@ -3599,7 +3600,25 @@ async def merge_nodes_and_edges(
         current_file_number: Current file number for logging
         total_files: Total files for logging
         file_path: File path for logging
+        heartbeat_callback: Optional async callback to update document heartbeat
     """
+    import time as time_module
+
+    # Heartbeat tracking: send heartbeat every 5 minutes to prevent stale detection
+    heartbeat_interval_seconds = global_config.get("heartbeat_interval_seconds", 300)
+    last_heartbeat_time = [time_module.time()]  # Mutable container for closure access
+
+    async def maybe_send_heartbeat():
+        """Send heartbeat if interval has elapsed."""
+        if heartbeat_callback:
+            current_time = time_module.time()
+            if current_time - last_heartbeat_time[0] >= heartbeat_interval_seconds:
+                try:
+                    await heartbeat_callback()
+                    last_heartbeat_time[0] = current_time
+                    logger.debug(f"Heartbeat sent during merge phase for doc {doc_id}")
+                except Exception as e:
+                    logger.warning(f"Heartbeat failed during merge: {e}")
 
     # Check for cancellation at the start of merge
     if pipeline_status is not None and pipeline_status_lock is not None:
@@ -3823,6 +3842,9 @@ async def merge_nodes_and_edges(
         f"[PERF] Phase 1 (entities): {(phase1_time - phase1_start) * 1000:.1f}ms ({total_entities_count} entities)"
     )
 
+    # Send heartbeat after Phase 1 to prevent stale detection during long merge
+    await maybe_send_heartbeat()
+
     # Batch VDB upsert for entities
     if entity_vdb and entity_vdb_batch:
         vdb_upsert_start = perf_time.perf_counter()
@@ -3967,6 +3989,9 @@ async def merge_nodes_and_edges(
         f"[PERF] Phase 2 (relations): {(phase2_time - phase2_start) * 1000:.1f}ms ({total_relations_count} relations)"
     )
 
+    # Send heartbeat after Phase 2 to prevent stale detection during long merge
+    await maybe_send_heartbeat()
+
     # Batch VDB upsert for relationships
     if relationships_vdb and rel_vdb_batch:
         rel_vdb_upsert_start = perf_time.perf_counter()
@@ -4078,6 +4103,11 @@ async def extract_entities(
     use_llm_func: callable = global_config["llm_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
     token_tracker = global_config.get("token_tracker")
+    heartbeat_callback = global_config.get("heartbeat_callback")
+    # Send heartbeat at most once per interval (in seconds) to prevent stale detection
+    # Default 300 seconds (5 min) caps DB load while protecting against 30-min stale threshold
+    heartbeat_interval_seconds = global_config.get("heartbeat_interval_seconds", 300)
+    last_heartbeat_time = [time.time()]  # Mutable container for nonlocal access
 
     ordered_chunks = list(chunks.items())
     # add language and example number params to prompt
@@ -4277,6 +4307,17 @@ async def extract_entities(
             async with pipeline_status_lock:
                 pipeline_status["latest_message"] = log_message
                 pipeline_status["history_messages"].append(log_message)
+
+        # Send time-based heartbeat to prevent stale detection during long extraction
+        # Only send if enough time has passed since last heartbeat (caps DB load)
+        if heartbeat_callback:
+            current_time = time.time()
+            if current_time - last_heartbeat_time[0] >= heartbeat_interval_seconds:
+                try:
+                    await heartbeat_callback()
+                    last_heartbeat_time[0] = current_time
+                except Exception as e:
+                    logger.warning(f"Heartbeat failed during extraction: {e}")
 
         # Return the extracted nodes and edges for centralized processing
         return maybe_nodes, maybe_edges

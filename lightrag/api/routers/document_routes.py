@@ -34,7 +34,11 @@ from lightrag.utils import (
 from lightrag.exceptions import PipelineNotInitializedError
 from lightrag.operate import rebuild_knowledge_from_chunks
 from lightrag.api.utils_api import get_combined_auth_dependency
-from lightrag.api.workspace_manager import get_rag, get_workspace_pool
+from lightrag.api.workspace_manager import (
+    get_rag,
+    get_rag_for_admin,
+    get_workspace_pool,
+)
 from ..config import global_args
 
 
@@ -319,6 +323,75 @@ class InsertResponse(BaseModel):
         }
 
 
+class BatchDocumentResult(BaseModel):
+    """Result for a single document in a batch insert operation"""
+
+    index: int = Field(description="Index of the document in the original request")
+    status: Literal["success", "duplicated", "in_progress", "failed"] = Field(
+        description="Status of this document"
+    )
+    doc_id: Optional[str] = Field(
+        default=None, description="Document ID (generated or existing)"
+    )
+    track_id: Optional[str] = Field(
+        default=None, description="Track ID for this document"
+    )
+    original_status: Optional[str] = Field(
+        default=None, description="Original status (for duplicates/in_progress)"
+    )
+    message: Optional[str] = Field(
+        default=None, description="Additional message (e.g., error details)"
+    )
+
+
+class BatchInsertResponse(BaseModel):
+    """Response model for batch document insertion operations
+
+    This response provides detailed per-document results, allowing clients
+    to handle partial successes gracefully.
+    """
+
+    status: Literal["success", "partial_success", "failure"] = Field(
+        description="Overall status: 'success' if all docs enqueued, 'partial_success' if some skipped, 'failure' if none enqueued"
+    )
+    total: int = Field(description="Total number of documents in the request")
+    enqueued: int = Field(description="Number of documents successfully enqueued")
+    skipped: int = Field(
+        description="Number of documents skipped (duplicates or in_progress)"
+    )
+    track_id: str = Field(
+        description="Track ID for the batch (use to poll status of enqueued docs)"
+    )
+    results: list[BatchDocumentResult] = Field(
+        description="Per-document results with status and IDs"
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "partial_success",
+                "total": 25,
+                "enqueued": 23,
+                "skipped": 2,
+                "track_id": "insert_20250729_170612_abc123",
+                "results": [
+                    {
+                        "index": 0,
+                        "status": "success",
+                        "doc_id": "doc-abc123",
+                        "track_id": "insert_20250729_170612_abc123",
+                    },
+                    {
+                        "index": 1,
+                        "status": "duplicated",
+                        "doc_id": "doc-xyz789",
+                        "original_status": "processed",
+                    },
+                ],
+            }
+        }
+
+
 # Documents stuck in pending/processing for longer than this are considered
 # abandoned (e.g. instance was killed during downscale) and can be re-submitted.
 STUCK_DOCUMENT_TIMEOUT_MINUTES = 10
@@ -467,6 +540,108 @@ class ClearQueueResponse(BaseModel):
                     "workspace1": {"pending": 10, "failed": 5},
                     "workspace2": {"pending": 5, "failed": 5},
                 },
+            }
+        }
+
+
+class ReclaimRequest(BaseModel):
+    """Request model for reclaiming stale/orphaned documents.
+
+    This is used to recover documents stuck in certain statuses
+    (e.g., 'processing' after a crash, or 'failed' after deadlocks).
+
+    Attributes:
+        source_status: Status to reclaim from ('processing', 'failed')
+        target_status: Status to set for reclaimed documents ('pending', 'failed')
+        stale_minutes: Minutes after which documents are considered stale (for processing status)
+        workspace: Optional specific workspace, or None for all workspaces
+        max_retry_count: Maximum retry_count to include (for failed status).
+            Only failed documents with retry_count <= max_retry_count will be reset.
+            Documents exceeding this threshold are considered permanently failed.
+            Defaults to None (no limit, reset all failed documents).
+    """
+
+    source_status: Literal["processing", "failed"] = Field(
+        default="processing",
+        description="Status to reclaim documents from",
+    )
+    target_status: Literal["pending", "failed"] = Field(
+        default="pending",
+        description="Status to set for reclaimed documents",
+    )
+    stale_minutes: int = Field(
+        default=30,
+        ge=1,
+        le=1440,
+        description="Minutes after which processing documents are considered stale (1-1440)",
+    )
+    workspace: Optional[str] = Field(
+        default=None,
+        description="Specific workspace to reclaim from, or null for all workspaces",
+    )
+    max_retry_count: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Maximum retry_count to include when resetting failed documents. "
+        "Only documents with retry_count <= max_retry_count will be reset. "
+        "Documents exceeding this threshold are considered permanently failed. "
+        "Defaults to null (no limit).",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "source_status": "failed",
+                "target_status": "pending",
+                "stale_minutes": 30,
+                "workspace": None,
+                "max_retry_count": 3,
+            }
+        }
+
+
+class ReclaimResponse(BaseModel):
+    """Response model for document reclaim operation.
+
+    Attributes:
+        status: Operation status ('ok' or 'error')
+        message: Optional error message
+        reclaimed_count: Number of documents reclaimed
+        reclaimed_ids: Sample of reclaimed document IDs (max 100)
+        source_status: Status documents were reclaimed from
+        target_status: Status documents were set to
+        stale_threshold_minutes: Threshold used for stale detection
+        skipped_permanently_failed: Count of documents skipped due to exceeding max_retry_count
+    """
+
+    status: Literal["ok", "error"] = Field(description="Operation status")
+    message: Optional[str] = Field(default=None, description="Error message if any")
+    reclaimed_count: int = Field(description="Number of documents reclaimed")
+    reclaimed_ids: List[str] = Field(
+        default_factory=list,
+        description="Sample of reclaimed document IDs (max 100)",
+    )
+    source_status: str = Field(description="Status documents were reclaimed from")
+    target_status: str = Field(description="Status documents were set to")
+    stale_threshold_minutes: Optional[int] = Field(
+        default=None, description="Threshold used (for processing reclaim)"
+    )
+    skipped_permanently_failed: Optional[int] = Field(
+        default=None,
+        description="Count of failed documents skipped due to exceeding max_retry_count",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "ok",
+                "message": None,
+                "reclaimed_count": 25,
+                "reclaimed_ids": ["doc1", "doc2", "doc3"],
+                "source_status": "failed",
+                "target_status": "pending",
+                "stale_threshold_minutes": None,
+                "skipped_permanently_failed": 5,
             }
         }
 
@@ -2579,7 +2754,7 @@ def create_document_routes(doc_manager: DocumentManager, api_key: Optional[str] 
 
     @router.post(
         "/texts",
-        response_model=InsertResponse,
+        response_model=BatchInsertResponse,
         dependencies=[Depends(combined_auth)],
     )
     async def insert_texts(
@@ -2591,139 +2766,160 @@ def create_document_routes(doc_manager: DocumentManager, api_key: Optional[str] 
         Insert multiple texts into the RAG system.
 
         This endpoint allows you to insert multiple text entries into the RAG system
-        in a single request.
+        in a single request. Unlike single-document endpoints, this endpoint does NOT
+        fail if some documents are duplicates - it collects per-document results and
+        continues processing valid documents.
 
         Args:
             request (InsertTextsRequest): The request body containing the list of texts.
             background_tasks: FastAPI BackgroundTasks for async processing
 
         Returns:
-            InsertResponse: A response object containing the status of the operation.
+            BatchInsertResponse: A response with per-document results and overall status.
 
         Raises:
             HTTPException: If an error occurs during text processing (500).
         """
         try:
-            # Check if any file_sources already exist in doc_status storage
-            if request.file_sources:
-                for file_source in request.file_sources:
+            # Generate track_id for this batch
+            track_id = generate_track_id("insert")
+
+            # Collect results for each document (no early return on duplicates)
+            results: list[BatchDocumentResult] = []
+            texts_to_enqueue: list[str] = []
+            file_sources_to_enqueue: list[str] = []
+
+            for i, text in enumerate(request.texts):
+                file_source = (
+                    request.file_sources[i]
+                    if request.file_sources and i < len(request.file_sources)
+                    else "unknown_source"
+                )
+
+                try:
+                    sanitized = sanitize_text_for_encoding(text)
+                    doc_id = compute_mdhash_id(sanitized, prefix="doc-")
+
+                    # Check by file_source first (if provided and valid)
+                    existing_doc = None
                     if (
                         file_source
                         and file_source.strip()
                         and file_source != "unknown_source"
                     ):
-                        existing_doc_data = await rag.doc_status.get_doc_by_file_path(
+                        existing_doc = await rag.doc_status.get_doc_by_file_path(
                             file_source
                         )
-                        if existing_doc_data:
-                            status = existing_doc_data.get("status", "unknown")
-                            if _is_stuck_document(existing_doc_data):
-                                logger.info(
-                                    f"Document '{file_source}' is stuck in '{status}' state, allowing re-submission"
-                                )
-                            elif status in ("pending", "processing"):
-                                # Document is currently being processed
-                                logger.info(
-                                    f"Document '{file_source}' is currently being processed (status={status})"
-                                )
-                                return InsertResponse(
-                                    status="in_progress",
-                                    message=f"File source '{file_source}' is already being processed (Status: {status}). Use track_id to poll status.",
-                                    track_id=existing_doc_data.get("track_id") or "",
-                                    doc_id=existing_doc_data.get("id"),
-                                    original_status=status,
-                                )
-                            else:
-                                return InsertResponse(
-                                    status="duplicated",
-                                    message=f"File source '{file_source}' already exists in document storage (Status: {status}).",
-                                    track_id=existing_doc_data.get("track_id") or "",
-                                    doc_id=existing_doc_data.get("id"),
-                                    original_status=status,
-                                )
 
-            # Generate track_id for texts insertion
-            track_id = generate_track_id("insert")
-
-            # Check for duplicate content BEFORE adding background task
-            # This is a read-only check - we do NOT insert into doc_status here
-            # to avoid orphaned records if the background task fails
-            processable_count = 0
-            try:
-                for i, text in enumerate(request.texts):
-                    sanitized = sanitize_text_for_encoding(text)
-                    doc_id = compute_mdhash_id(sanitized, prefix="doc-")
-                    file_source = (
-                        request.file_sources[i]
-                        if request.file_sources and i < len(request.file_sources)
-                        else "unknown_source"
-                    )
-
-                    # Check if document already exists (read-only, no INSERT)
-                    existing_doc = await rag.doc_status.get_by_id(doc_id)
+                    # If not found by file_source, check by content hash
+                    if not existing_doc:
+                        existing_doc = await rag.doc_status.get_by_id(doc_id)
 
                     if existing_doc:
                         existing_status = existing_doc.get("status", "unknown")
+                        existing_doc_id = existing_doc.get("id", doc_id)
 
-                        # Failed documents can be re-indexed - count as processable
-                        if existing_status == "failed":
+                        # Failed or stuck documents can be re-submitted
+                        if existing_status == "failed" or _is_stuck_document(
+                            existing_doc
+                        ):
                             logger.info(
-                                f"Document {doc_id} previously failed, allowing re-submission"
+                                f"Document {doc_id} (status={existing_status}) can be re-submitted"
                             )
-                            processable_count += 1
-                        # Stuck documents can be re-submitted
-                        elif _is_stuck_document(existing_doc):
-                            logger.info(
-                                f"Document {doc_id} is stuck in '{existing_status}' state, allowing re-submission"
+                            texts_to_enqueue.append(text)
+                            file_sources_to_enqueue.append(file_source)
+                            results.append(
+                                BatchDocumentResult(
+                                    index=i,
+                                    status="success",
+                                    doc_id=doc_id,
+                                    track_id=track_id,
+                                    message=f"Re-submitting {existing_status} document",
+                                )
                             )
-                            processable_count += 1
                         elif existing_status in ("pending", "processing"):
-                            # Document is currently being processed - return in_progress
+                            # Document is currently being processed - skip but record
                             logger.info(
-                                f"Document {doc_id} is currently being processed (status={existing_status}), "
-                                f"returning existing track_id for polling"
+                                f"Document {doc_id} is in_progress (status={existing_status})"
                             )
-                            return InsertResponse(
-                                status="in_progress",
-                                message=f"Content of text #{i + 1} ('{file_source}') is already being processed (Status: {existing_status}). Use track_id to poll status.",
-                                track_id=existing_doc.get("track_id") or "",
-                                doc_id=doc_id,
-                                original_status=existing_status,
+                            results.append(
+                                BatchDocumentResult(
+                                    index=i,
+                                    status="in_progress",
+                                    doc_id=existing_doc_id,
+                                    track_id=existing_doc.get("track_id"),
+                                    original_status=existing_status,
+                                )
                             )
                         else:
-                            # True duplicate (processed, skipped, etc.) - return immediately
-                            return InsertResponse(
-                                status="duplicated",
-                                message=f"Content of text #{i + 1} ('{file_source}') already exists (Status: {existing_status}).",
-                                track_id=existing_doc.get("track_id") or "",
-                                doc_id=doc_id,
-                                original_status=existing_status,
+                            # True duplicate (processed, skipped, etc.)
+                            logger.debug(
+                                f"Document {doc_id} is duplicate (status={existing_status})"
+                            )
+                            results.append(
+                                BatchDocumentResult(
+                                    index=i,
+                                    status="duplicated",
+                                    doc_id=existing_doc_id,
+                                    original_status=existing_status,
+                                )
                             )
                     else:
-                        processable_count += 1
+                        # New document - add to enqueue list
+                        texts_to_enqueue.append(text)
+                        file_sources_to_enqueue.append(file_source)
+                        results.append(
+                            BatchDocumentResult(
+                                index=i,
+                                status="success",
+                                doc_id=doc_id,
+                                track_id=track_id,
+                            )
+                        )
 
-                logger.debug(
-                    f"Found {processable_count} processable documents for track_id {track_id}"
+                except Exception as e:
+                    # Error processing this document - record but continue with others
+                    logger.warning(f"Error checking document {i}: {e}")
+                    results.append(
+                        BatchDocumentResult(
+                            index=i,
+                            status="failed",
+                            message=str(e),
+                        )
+                    )
+
+            # Calculate summary stats
+            enqueued_count = len(texts_to_enqueue)
+            skipped_count = len(request.texts) - enqueued_count
+
+            # Only enqueue if there are valid documents
+            if texts_to_enqueue:
+                background_tasks.add_task(
+                    pipeline_index_texts,
+                    rag,
+                    texts_to_enqueue,
+                    file_sources=file_sources_to_enqueue,
+                    track_id=track_id,
+                )
+                logger.info(
+                    f"Batch {track_id}: enqueued {enqueued_count}, skipped {skipped_count}"
                 )
 
-            except Exception as e:
-                # Non-blocking: if duplicate check fails, fall through to normal processing
-                logger.warning(
-                    f"Duplicate check failed, proceeding with normal flow: {e}"
-                )
+            # Determine overall status
+            if enqueued_count == len(request.texts):
+                overall_status = "success"
+            elif enqueued_count > 0:
+                overall_status = "partial_success"
+            else:
+                overall_status = "failure"
 
-            background_tasks.add_task(
-                pipeline_index_texts,
-                rag,
-                request.texts,
-                file_sources=request.file_sources,
+            return BatchInsertResponse(
+                status=overall_status,
+                total=len(request.texts),
+                enqueued=enqueued_count,
+                skipped=skipped_count,
                 track_id=track_id,
-            )
-
-            return InsertResponse(
-                status="success",
-                message="Texts successfully received. Processing will continue in background.",
-                track_id=track_id,
+                results=results,
             )
         except Exception as e:
             logger.error(f"Error /documents/texts: {str(e)}")
@@ -3811,6 +4007,97 @@ def create_document_routes(doc_manager: DocumentManager, api_key: Optional[str] 
 
         except Exception as e:
             logger.error(f"Error requesting pipeline cancellation: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post(
+        "/reclaim",
+        response_model=ReclaimResponse,
+        dependencies=[Depends(combined_auth)],
+    )
+    async def reclaim_documents(
+        request: ReclaimRequest,
+        rag: LightRAG = Depends(get_rag_for_admin),
+    ):
+        """
+        Reclaim documents stuck in a certain status.
+
+        This endpoint does NOT require a workspace header - it operates across all
+        workspaces by default. Use the `workspace` field in the request body to
+        limit the operation to a specific workspace.
+
+        Use this endpoint to recover from:
+        - **Stale processing**: Documents stuck in 'processing' after a crash/deadlock
+        - **Failed documents**: Reset 'failed' documents to 'pending' for retry
+
+        For 'processing' status, only documents older than `stale_minutes` are reclaimed.
+        For 'failed' status, all failed documents are reset (stale_minutes is ignored).
+
+        Args:
+            request: ReclaimRequest with source_status, target_status, stale_minutes, workspace
+
+        Returns:
+            ReclaimResponse with count and sample of reclaimed document IDs
+        """
+        try:
+            if rag.doc_status is None:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Document status storage not available",
+                )
+
+            # Check if the doc_status has the reclaim methods
+            if not hasattr(rag.doc_status, "reclaim_stale_processing"):
+                raise HTTPException(
+                    status_code=501,
+                    detail="Reclaim not supported for this storage backend",
+                )
+
+            if request.source_status == "processing":
+                # Reclaim stale processing documents
+                result = await rag.doc_status.reclaim_stale_processing(
+                    stale_minutes=request.stale_minutes,
+                    target_status=request.target_status,
+                    workspace=request.workspace,
+                )
+                return ReclaimResponse(
+                    status=result.get("status", "error"),
+                    message=result.get("message"),
+                    reclaimed_count=result.get("reclaimed_count", 0),
+                    reclaimed_ids=result.get("reclaimed_ids", []),
+                    source_status="processing",
+                    target_status=request.target_status,
+                    stale_threshold_minutes=request.stale_minutes,
+                )
+
+            elif request.source_status == "failed":
+                # Reset failed documents to target status (filtered by max_retry_count if provided)
+                result = await rag.doc_status.reset_failed_documents(
+                    target_status=request.target_status,
+                    workspace=request.workspace,
+                    max_retry_count=request.max_retry_count,
+                )
+                return ReclaimResponse(
+                    status=result.get("status", "error"),
+                    message=result.get("message"),
+                    reclaimed_count=result.get("reclaimed_count", 0),
+                    reclaimed_ids=result.get("reclaimed_ids", []),
+                    source_status="failed",
+                    target_status=request.target_status,
+                    stale_threshold_minutes=None,
+                    skipped_permanently_failed=result.get("skipped_permanently_failed"),
+                )
+
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid source_status: {request.source_status}",
+                )
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error reclaiming documents: {str(e)}")
             logger.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e))
 

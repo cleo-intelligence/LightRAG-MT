@@ -15,6 +15,7 @@ import logging.config
 import sys
 import signal
 import asyncio
+import time as _time
 import uvicorn
 import pipmaster as pm
 from fastapi.staticfiles import StaticFiles
@@ -85,6 +86,223 @@ from lightrag.api.auth import auth_handler
 # allows to use different .env file for each lightrag instance
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path=".env", override=False)
+
+# ========== Background Metrics Cache ==========
+# Module-level cache following the _drain_mode pattern in shared_storage.py.
+# A background task populates this periodically; /metrics reads it instantly.
+_metrics_cache: dict = {
+    "populated": False,  # True once first collection succeeds
+    "last_updated": 0.0,  # _time.monotonic() of last successful update
+    "last_error": None,  # str or None
+    # DB-dependent metrics (expensive to collect)
+    "total_pending": 0,
+    "total_processing": 0,
+    "total_processed": 0,
+    "total_failed": 0,
+    "total_preprocessed": 0,
+    "total_graph_nodes": 0,
+    "total_graph_edges": 0,
+    "workspace_count": 0,
+    # DB pool metrics
+    "db_pool_size": 0,
+    "db_pool_idle": 0,
+    "db_pool_max": 0,
+    "db_pool_min": 0,
+    "db_pool_available": False,
+}
+_metrics_collector_task: asyncio.Task | None = None
+_metrics_collector_running: bool = False
+
+
+def _get_metrics_cache() -> dict:
+    """Get a snapshot of the cached metrics."""
+    return dict(_metrics_cache)
+
+
+def _update_metrics_cache(updates: dict) -> None:
+    """Update the metrics cache with new values."""
+    _metrics_cache.update(updates)
+    _metrics_cache["last_updated"] = _time.monotonic()
+    _metrics_cache["populated"] = True
+    _metrics_cache["last_error"] = None
+
+
+async def _metrics_collector_loop() -> None:
+    """Background task that periodically collects DB-dependent metrics.
+
+    Pattern follows InstanceRegistry._heartbeat_loop() in instance_registry.py.
+    Runs every LIGHTRAG_METRICS_REFRESH_INTERVAL seconds. On error, logs a
+    warning and retries on next cycle (cache serves stale data in the meantime).
+    """
+    global _metrics_collector_running
+
+    refresh_interval = int(os.getenv("LIGHTRAG_METRICS_REFRESH_INTERVAL", "10"))
+
+    # Brief initial delay to let storages initialize
+    await asyncio.sleep(2)
+
+    while _metrics_collector_running:
+        try:
+            pool = get_workspace_pool()
+            if pool is None:
+                await asyncio.sleep(refresh_interval)
+                continue
+
+            # --- Determine collection path ---
+            use_stored_procedure = False
+            pg_doc_status = None
+
+            for _ws_id, instance in list(pool._instances.items()):
+                try:
+                    rag = instance.rag_instance
+                    if (
+                        hasattr(rag, "doc_status")
+                        and rag.doc_status is not None
+                        and hasattr(rag.doc_status, "get_aggregated_metrics")
+                    ):
+                        pg_doc_status = rag.doc_status
+                        use_stored_procedure = True
+                        break
+                except Exception:
+                    continue
+
+            total_pending = 0
+            total_processing = 0
+            total_processed = 0
+            total_failed = 0
+            total_preprocessed = 0
+            total_graph_nodes = 0
+            total_graph_edges = 0
+            workspace_count = len(pool._instances)
+
+            if use_stored_procedure and pg_doc_status is not None:
+                try:
+                    metrics = await pg_doc_status.get_aggregated_metrics(workspace=None)
+                    if metrics.get("status") == "ok":
+                        docs = metrics.get("documents", {})
+                        total_pending = docs.get("pending", 0)
+                        total_processing = docs.get("processing", 0)
+                        total_processed = docs.get("processed", 0)
+                        total_failed = docs.get("failed", 0)
+                        total_preprocessed = docs.get("preprocessed", 0)
+
+                        graph = metrics.get("graph", {})
+                        total_graph_nodes = graph.get("nodes", 0)
+                        total_graph_edges = graph.get("edges", 0)
+                        workspace_count = metrics.get(
+                            "workspace_count", workspace_count
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"Metrics collector: stored procedure failed, trying fallback: {e}"
+                    )
+                    use_stored_procedure = False
+
+            if not use_stored_procedure:
+                for ws_id, instance in list(pool._instances.items()):
+                    try:
+                        rag = instance.rag_instance
+                        if hasattr(rag, "doc_status") and rag.doc_status is not None:
+                            pending_docs = await rag.doc_status.get_docs_by_status(
+                                DocStatus.PENDING
+                            )
+                            processing_docs = await rag.doc_status.get_docs_by_status(
+                                DocStatus.PROCESSING
+                            )
+                            processed_docs = await rag.doc_status.get_docs_by_status(
+                                DocStatus.PROCESSED
+                            )
+                            failed_docs = await rag.doc_status.get_docs_by_status(
+                                DocStatus.FAILED
+                            )
+                            preprocessed_docs = await rag.doc_status.get_docs_by_status(
+                                DocStatus.PREPROCESSED
+                            )
+
+                            total_pending += len(pending_docs) if pending_docs else 0
+                            total_processing += (
+                                len(processing_docs) if processing_docs else 0
+                            )
+                            total_processed += (
+                                len(processed_docs) if processed_docs else 0
+                            )
+                            total_failed += len(failed_docs) if failed_docs else 0
+                            total_preprocessed += (
+                                len(preprocessed_docs) if preprocessed_docs else 0
+                            )
+
+                        if (
+                            hasattr(rag, "knowledge_graph_inst")
+                            and rag.knowledge_graph_inst is not None
+                        ):
+                            kg = rag.knowledge_graph_inst
+                            if hasattr(kg, "get_node_count"):
+                                try:
+                                    node_count = await kg.get_node_count()
+                                    total_graph_nodes += node_count if node_count else 0
+                                except Exception:
+                                    pass
+                            if hasattr(kg, "get_edge_count"):
+                                try:
+                                    edge_count = await kg.get_edge_count()
+                                    total_graph_edges += edge_count if edge_count else 0
+                                except Exception:
+                                    pass
+                    except Exception as e:
+                        logger.warning(
+                            f"Metrics collector: error for workspace {ws_id}: {e}"
+                        )
+                        continue
+
+            # --- Collect DB pool metrics ---
+            db_pool_size = 0
+            db_pool_idle = 0
+            db_pool_max = 0
+            db_pool_min = 0
+            db_pool_available = False
+
+            for _ws_id, instance in list(pool._instances.items()):
+                try:
+                    rag = instance.rag_instance
+                    if hasattr(rag, "doc_status") and rag.doc_status is not None:
+                        storage = rag.doc_status
+                        if hasattr(storage, "db") and storage.db is not None:
+                            db = storage.db
+                            if hasattr(db, "pool") and db.pool is not None:
+                                pg_pool = db.pool
+                                db_pool_size = pg_pool.get_size()
+                                db_pool_idle = pg_pool.get_idle_size()
+                                db_pool_max = pg_pool.get_max_size()
+                                db_pool_min = pg_pool.get_min_size()
+                                db_pool_available = True
+                                break
+                except Exception:
+                    continue
+
+            # --- Atomic cache update ---
+            _update_metrics_cache(
+                {
+                    "total_pending": total_pending,
+                    "total_processing": total_processing,
+                    "total_processed": total_processed,
+                    "total_failed": total_failed,
+                    "total_preprocessed": total_preprocessed,
+                    "total_graph_nodes": total_graph_nodes,
+                    "total_graph_edges": total_graph_edges,
+                    "workspace_count": workspace_count,
+                    "db_pool_size": db_pool_size,
+                    "db_pool_idle": db_pool_idle,
+                    "db_pool_max": db_pool_max,
+                    "db_pool_min": db_pool_min,
+                    "db_pool_available": db_pool_available,
+                }
+            )
+
+        except Exception as e:
+            _metrics_cache["last_error"] = str(e)
+            logger.warning(f"Metrics collector error: {e}")
+
+        await asyncio.sleep(refresh_interval)
 
 
 webui_title = os.getenv("WEBUI_TITLE")
@@ -381,13 +599,56 @@ def create_app(args):
 
         # SIGTERM handler for graceful shutdown
         _shutdown_event = asyncio.Event()  # Reserved for future use
+        _sigterm_handled = False  # Prevent re-entry
 
         def sigterm_handler(signum, frame):
-            """Handle SIGTERM signal for graceful shutdown."""
+            """Handle SIGTERM signal for graceful shutdown.
+
+            Order of operations (critical for Cleo autoscaler):
+            1. Set drain mode (stop accepting new work)
+            2. Unregister from lightrag_instances IMMEDIATELY
+               - This is CRITICAL: Cleo must not see this instance anymore
+            3. The finally block will then wait for pipelines to complete
+            """
+            nonlocal _sigterm_handled
+            if _sigterm_handled:
+                logger.debug("SIGTERM already handled - ignoring duplicate signal")
+                return
+            _sigterm_handled = True
+
             logger.info("SIGTERM received - initiating graceful shutdown...")
+
+            # Step 1: Enable drain mode immediately (stop accepting new work)
             set_drain_mode(enabled=True, reason="SIGTERM received - graceful shutdown")
-            # Signal the shutdown event (but don't block here)
-            # The actual waiting happens in the finally block
+
+            # Step 2: Unregister from database IMMEDIATELY
+            # This is critical for Cleo - the instance must disappear from
+            # lightrag_instances before we start waiting for pipelines
+            registry = get_instance_registry()
+            if registry is not None:
+                try:
+                    # Schedule async unregister on the event loop
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Create a task to unregister (non-blocking)
+                        asyncio.create_task(_async_unregister_instance(registry))
+                    else:
+                        # Fallback: run synchronously if no loop
+                        loop.run_until_complete(registry.unregister())
+                    logger.info(
+                        f"Instance {registry.instance_id} unregistration scheduled"
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to unregister instance on SIGTERM: {e}")
+                    # Continue shutdown anyway - Cleo has fallback cleanup
+
+        async def _async_unregister_instance(registry: InstanceRegistry):
+            """Async helper to unregister instance from database."""
+            try:
+                await registry.unregister()
+                logger.info(f"Instance {registry.instance_id} unregistered from DB")
+            except Exception as e:
+                logger.warning(f"Async unregister failed: {e}")
 
         # Register signal handler (only in main thread)
         try:
@@ -426,13 +687,16 @@ def create_app(args):
                     instance_registry = InstanceRegistry(db=pg_db)
                     await instance_registry.initialize()
 
-                    # Set callback to activate local drain mode when DB drain is requested
+                    # Set callback to handle drain mode changes (enable or cancel)
                     def on_drain_requested(drain_requested: bool, reason: str):
                         if drain_requested and not is_drain_mode_enabled():
                             set_drain_mode(
                                 enabled=True,
                                 reason=reason or "Coordinated drain request",
                             )
+                        elif not drain_requested and is_drain_mode_enabled():
+                            # Drain was cancelled - resume normal operation
+                            set_drain_mode(enabled=False)
 
                     instance_registry.set_drain_callback(on_drain_requested)
 
@@ -450,6 +714,16 @@ def create_app(args):
                     instance_registry = None
 
             ASCIIColors.green("\nServer is ready to accept connections! 🚀\n")
+
+            # Start background metrics collector
+            global _metrics_collector_running, _metrics_collector_task
+            _metrics_collector_running = True
+            _metrics_collector_task = asyncio.create_task(_metrics_collector_loop())
+            app.state.background_tasks.add(_metrics_collector_task)
+            _metrics_collector_task.add_done_callback(
+                app.state.background_tasks.discard
+            )
+            logger.info("Background metrics collector started")
 
             yield
 
@@ -491,6 +765,17 @@ def create_app(args):
                     f"({elapsed:.0f}s/{timeout}s) - workspaces: {pipeline_status['busy_workspaces']}"
                 )
                 await asyncio.sleep(check_interval)
+
+            # Step 2b: Stop background metrics collector
+            _metrics_collector_running = False
+            if _metrics_collector_task is not None:
+                _metrics_collector_task.cancel()
+                try:
+                    await _metrics_collector_task
+                except asyncio.CancelledError:
+                    pass
+                _metrics_collector_task = None
+            logger.info("Background metrics collector stopped")
 
             # Step 3: Clean up instance registry
             if instance_registry is not None:
@@ -1824,31 +2109,19 @@ def create_app(args):
         response_class=PlainTextResponse,
     )
     async def get_metrics():
+        """Prometheus metrics endpoint. Serves cached DB metrics + live in-memory metrics.
+
+        DB-dependent metrics (document counts, graph counts, pool stats) are collected
+        by a background task every LIGHTRAG_METRICS_REFRESH_INTERVAL seconds and served
+        from cache. In-memory metrics (pipeline status, drain mode, LLM, asyncio) are
+        always collected live with zero DB cost.
         """
-        Prometheus metrics endpoint for autoscaling and monitoring.
-
-        Key metrics for autoscaling:
-        - lightrag_queue_depth: Documents pending processing (PENDING + FAILED)
-        - lightrag_processing_count: Documents currently being processed
-
-        Additional metrics for monitoring:
-        - lightrag_processed_total: Total documents processed
-        - lightrag_workspaces_active: Active workspace instances
-        - lightrag_pipelines_busy: Currently active pipelines
-        - lightrag_graph_nodes_total: Total nodes in knowledge graph
-        - lightrag_graph_edges_total: Total edges in knowledge graph
-        - lightrag_instance_info: Instance identification (instance_id, hostname)
-
-        All instance-local metrics include instance_id label for multi-instance deployments.
-        Configure Render/K8s to scale when lightrag_queue_depth > threshold.
-        """
-        # Get instance identification
+        # Get instance identification (cheap -- reads module-level state)
         registry = get_instance_registry()
         if registry is not None:
             instance_id = registry.instance_id
             hostname = registry.hostname
         else:
-            # Fallback if registry not initialized
             import socket
 
             instance_id = "unknown"
@@ -1856,130 +2129,47 @@ def create_app(args):
 
         pool = get_workspace_pool()
         if pool is None:
-            # No pool initialized yet
             return PlainTextResponse(
                 content="# No workspace pool initialized\n",
                 media_type="text/plain; version=0.0.4; charset=utf-8",
             )
 
-        # Try to use stored procedure for efficient aggregation (single DB query)
-        # This replaces N*5+ queries with a single query
-        use_stored_procedure = False
-        pg_doc_status = None
+        # --- DB-dependent metrics: read from background cache (zero DB queries) ---
+        cache = _get_metrics_cache()
 
-        # Find a workspace instance with PostgreSQL doc_status storage
-        for workspace_id, instance in list(pool._instances.items()):
-            try:
-                rag = instance.rag_instance
-                if (
-                    hasattr(rag, "doc_status")
-                    and rag.doc_status is not None
-                    and hasattr(rag.doc_status, "get_aggregated_metrics")
-                ):
-                    pg_doc_status = rag.doc_status
-                    use_stored_procedure = True
-                    break
-            except Exception:
-                continue
+        if cache["populated"]:
+            total_pending = cache["total_pending"]
+            total_processing = cache["total_processing"]
+            total_processed = cache["total_processed"]
+            total_failed = cache["total_failed"]
+            total_preprocessed = cache["total_preprocessed"]
+            total_graph_nodes = cache["total_graph_nodes"]
+            total_graph_edges = cache["total_graph_edges"]
+            workspace_count = cache["workspace_count"]
+            db_pool_size = cache["db_pool_size"]
+            db_pool_idle = cache["db_pool_idle"]
+            db_pool_max = cache["db_pool_max"]
+            db_pool_min = cache["db_pool_min"]
+            db_pool_available = cache["db_pool_available"]
+        else:
+            # Cache not yet populated (first ~12s after startup) - return zeros
+            total_pending = 0
+            total_processing = 0
+            total_processed = 0
+            total_failed = 0
+            total_preprocessed = 0
+            total_graph_nodes = 0
+            total_graph_edges = 0
+            workspace_count = len(pool._instances)
+            db_pool_size = 0
+            db_pool_idle = 0
+            db_pool_max = 0
+            db_pool_min = 0
+            db_pool_available = False
 
-        # Initialize metrics
-        total_pending = 0
-        total_processing = 0
-        total_processed = 0
-        total_failed = 0
-        total_preprocessed = 0
-        total_graph_nodes = 0
-        total_graph_edges = 0
-        workspace_count = len(pool._instances)
-
-        if use_stored_procedure and pg_doc_status is not None:
-            # FAST PATH: Use stored procedure for all metrics in one query
-            try:
-                metrics = await pg_doc_status.get_aggregated_metrics(workspace=None)
-                if metrics.get("status") == "ok":
-                    docs = metrics.get("documents", {})
-                    total_pending = docs.get("pending", 0)
-                    total_processing = docs.get("processing", 0)
-                    total_processed = docs.get("processed", 0)
-                    total_failed = docs.get("failed", 0)
-                    total_preprocessed = docs.get("preprocessed", 0)
-
-                    graph = metrics.get("graph", {})
-                    total_graph_nodes = graph.get("nodes", 0)
-                    total_graph_edges = graph.get("edges", 0)
-                    workspace_count = metrics.get("workspace_count", workspace_count)
-            except Exception as e:
-                logger.warning(
-                    f"Stored procedure metrics failed, falling back to iteration: {e}"
-                )
-                use_stored_procedure = False
-
-        if not use_stored_procedure:
-            # SLOW PATH: Fall back to iterating through workspaces (for non-PostgreSQL backends)
-            for workspace_id, instance in list(pool._instances.items()):
-                try:
-                    rag = instance.rag_instance
-
-                    # Document status metrics
-                    if hasattr(rag, "doc_status") and rag.doc_status is not None:
-                        pending_docs = await rag.doc_status.get_docs_by_status(
-                            DocStatus.PENDING
-                        )
-                        processing_docs = await rag.doc_status.get_docs_by_status(
-                            DocStatus.PROCESSING
-                        )
-                        processed_docs = await rag.doc_status.get_docs_by_status(
-                            DocStatus.PROCESSED
-                        )
-                        failed_docs = await rag.doc_status.get_docs_by_status(
-                            DocStatus.FAILED
-                        )
-                        preprocessed_docs = await rag.doc_status.get_docs_by_status(
-                            DocStatus.PREPROCESSED
-                        )
-
-                        total_pending += len(pending_docs) if pending_docs else 0
-                        total_processing += (
-                            len(processing_docs) if processing_docs else 0
-                        )
-                        total_processed += len(processed_docs) if processed_docs else 0
-                        total_failed += len(failed_docs) if failed_docs else 0
-                        total_preprocessed += (
-                            len(preprocessed_docs) if preprocessed_docs else 0
-                        )
-
-                    # Graph metrics (if available)
-                    if (
-                        hasattr(rag, "knowledge_graph_inst")
-                        and rag.knowledge_graph_inst is not None
-                    ):
-                        kg = rag.knowledge_graph_inst
-                        # Try to get node count (some backends cache this)
-                        if hasattr(kg, "get_node_count"):
-                            try:
-                                node_count = await kg.get_node_count()
-                                total_graph_nodes += node_count if node_count else 0
-                            except Exception:
-                                pass
-                        # Try to get edge count
-                        if hasattr(kg, "get_edge_count"):
-                            try:
-                                edge_count = await kg.get_edge_count()
-                                total_graph_edges += edge_count if edge_count else 0
-                            except Exception:
-                                pass
-
-                except Exception as e:
-                    logger.warning(
-                        f"Error getting metrics for workspace {workspace_id}: {e}"
-                    )
-                    continue
-
-        # Get pipeline status
+        # --- In-memory metrics: always collected live (zero DB cost) ---
         pipeline_status = is_any_pipeline_busy()
         busy_pipeline_count = len(pipeline_status.get("busy_workspaces", []))
-
-        # Queue depth = pending + failed (documents that need processing)
         queue_depth = total_pending + total_failed
 
         # Build Prometheus metrics output
@@ -2044,7 +2234,7 @@ def create_app(args):
             "",
         ]
 
-        # Get LLM metrics once
+        # LLM metrics (in-memory singleton, always live)
         llm_metrics = get_llm_metrics().get_metrics()
         metrics_lines.extend(
             [
@@ -2081,36 +2271,7 @@ def create_app(args):
             ]
         )
 
-        # Database pool metrics (if PostgreSQL backend is used)
-        db_pool_size = 0
-        db_pool_idle = 0
-        db_pool_max = 0
-        db_pool_min = 0
-        db_pool_available = False
-
-        # Try to get pool from any active workspace
-        for workspace_id, instance in list(pool._instances.items()):
-            try:
-                rag = instance.rag_instance
-                # Check doc_status storage for db access
-                if hasattr(rag, "doc_status") and rag.doc_status is not None:
-                    storage = rag.doc_status
-                    if hasattr(storage, "db") and storage.db is not None:
-                        db = storage.db
-                        if hasattr(db, "pool") and db.pool is not None:
-                            pg_pool = db.pool
-                            db_pool_size = pg_pool.get_size()
-                            db_pool_idle = pg_pool.get_idle_size()
-                            db_pool_max = pg_pool.get_max_size()
-                            db_pool_min = pg_pool.get_min_size()
-                            db_pool_available = True
-                            break  # Only need one pool (shared across storages)
-            except Exception as e:
-                logger.debug(
-                    f"Could not get DB pool metrics from workspace {workspace_id}: {e}"
-                )
-                continue
-
+        # Database pool metrics from cache
         if db_pool_available:
             metrics_lines.extend(
                 [
@@ -2143,8 +2304,18 @@ def create_app(args):
                 ]
             )
 
+        # Cache observability metric
+        cache_age = (
+            _time.monotonic() - cache["last_updated"] if cache["populated"] else -1
+        )
         metrics_lines.extend(
             [
+                "# ====== METRICS CACHE ======",
+                "",
+                "# HELP lightrag_metrics_cache_age_seconds Seconds since last background metrics refresh (-1 = not yet populated)",
+                "# TYPE lightrag_metrics_cache_age_seconds gauge",
+                f'lightrag_metrics_cache_age_seconds{{instance_id="{instance_id}"}} {cache_age:.1f}',
+                "",
                 "# ====== INFO ======",
                 "",
                 "# HELP lightrag_instance_info Instance identification for multi-instance deployments",

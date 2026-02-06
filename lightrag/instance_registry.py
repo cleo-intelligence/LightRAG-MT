@@ -99,8 +99,14 @@ class InstanceRegistry:
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._drain_poll_task: Optional[asyncio.Task] = None
         self._running = False
+        self._unregistered = (
+            False  # Track if already unregistered (for SIGTERM handling)
+        )
+        self._was_draining = (
+            False  # Track previous drain state for cancellation detection
+        )
 
-        # Callback for when drain is requested
+        # Callback for when drain status changes (requested or cancelled)
         self._on_drain_requested: Optional[callable] = None
 
     @asynccontextmanager
@@ -150,13 +156,23 @@ class InstanceRegistry:
         logger.info(f"Instance registered: {self.instance_id} ({self.hostname})")
 
     async def unregister(self) -> None:
-        """Unregister this instance from the database."""
+        """Unregister this instance from the database.
+
+        Safe to call multiple times - will only unregister once.
+        This is important for SIGTERM handling where we unregister
+        immediately but stop_background_tasks may also try to unregister.
+        """
+        if self._unregistered:
+            logger.debug(f"Instance {self.instance_id} already unregistered - skipping")
+            return
+
         async with self._acquire_connection() as conn:
             await conn.execute(
                 "DELETE FROM LIGHTRAG_INSTANCES WHERE instance_id = $1",
                 self.instance_id,
             )
 
+        self._unregistered = True
         logger.info(f"Instance unregistered: {self.instance_id}")
 
     async def heartbeat(
@@ -164,9 +180,12 @@ class InstanceRegistry:
         processing_count: int = 0,
         pipeline_busy: bool = False,
     ) -> None:
-        """Send a heartbeat update."""
+        """Send a heartbeat update.
+
+        If the instance was deleted (e.g., by watchdog), re-register automatically.
+        """
         async with self._acquire_connection() as conn:
-            await conn.execute(
+            result = await conn.execute(
                 """
                 UPDATE LIGHTRAG_INSTANCES
                 SET last_heartbeat = NOW(),
@@ -178,6 +197,18 @@ class InstanceRegistry:
                 processing_count,
                 pipeline_busy,
             )
+
+            # Check if UPDATE affected any rows (result is "UPDATE N")
+            rows_affected = int(result.split()[-1]) if result else 0
+
+        # Re-register outside the connection context to avoid nested acquire
+        if rows_affected == 0:
+            logger.warning(
+                f"Instance {self.instance_id} not found in DB - re-registering"
+            )
+            self._unregistered = False  # Reset so register() works
+            self._was_draining = False  # Reset drain state
+            await self.register()
 
     async def check_drain_requested(self) -> tuple[bool, Optional[str]]:
         """Check if drain has been requested for this instance.
@@ -442,9 +473,22 @@ class InstanceRegistry:
             try:
                 drain_requested, drain_reason = await self.check_drain_requested()
 
-                if drain_requested and self._on_drain_requested:
-                    # Trigger callback (which should activate local drain mode)
-                    self._on_drain_requested(drain_requested, drain_reason)
+                # Detect state transitions
+                if drain_requested and not self._was_draining:
+                    # Transition: not draining -> draining
+                    logger.info(
+                        f"Drain requested for instance {self.instance_id}: {drain_reason}"
+                    )
+                    if self._on_drain_requested:
+                        self._on_drain_requested(True, drain_reason)
+                    self._was_draining = True
+
+                elif not drain_requested and self._was_draining:
+                    # Transition: draining -> not draining (drain cancelled)
+                    logger.info(f"Drain cancelled for instance {self.instance_id}")
+                    if self._on_drain_requested:
+                        self._on_drain_requested(False, None)
+                    self._was_draining = False
 
             except Exception as e:
                 logger.warning(f"Drain poll error: {e}")

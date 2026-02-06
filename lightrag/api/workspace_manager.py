@@ -206,6 +206,10 @@ class WorkspacePool:
             self._lru_order.remove(workspace_id)
         self._lru_order.append(workspace_id)
 
+    def list_active(self) -> list[str]:
+        """Return list of currently active workspace IDs in the pool."""
+        return list(self._instances.keys())
+
     async def finalize_all(self) -> None:
         """Finalize all workspace instances for graceful shutdown."""
         async with self._lock:
@@ -373,4 +377,75 @@ async def get_rag(request: Request) -> object:
         raise HTTPException(
             status_code=503,
             detail=f"Failed to initialize workspace '{workspace}': {str(e)}",
+        )
+
+
+async def get_rag_for_admin(request: Request) -> object:
+    """
+    FastAPI dependency for admin operations that don't require a specific workspace.
+
+    This dependency is used for cross-workspace administrative operations like:
+    - Reclaiming orphaned documents across all workspaces
+    - Global metrics collection
+    - System-wide maintenance tasks
+
+    It uses the workspace from header if provided, otherwise falls back to
+    any available instance from the pool or the default workspace.
+
+    Args:
+        request: FastAPI request object
+
+    Returns:
+        LightRAG instance (any workspace - they share doc_status storage)
+
+    Raises:
+        HTTPException: 503 if no instances available and cannot create default
+    """
+    config = get_workspace_config()
+    pool = get_workspace_pool()
+
+    # Try to extract workspace from headers (optional)
+    workspace = get_workspace_from_request(request)
+
+    # If workspace provided, use it
+    if workspace:
+        try:
+            validate_workspace_id(workspace)
+            logger.info(f"Admin request with workspace: {workspace}")
+            return await pool.get(workspace)
+        except (ValueError, RuntimeError) as e:
+            logger.warning(f"Failed to use provided workspace '{workspace}': {e}")
+            # Fall through to get any available instance
+
+    # Try to get any existing instance from the pool
+    # All instances share the same doc_status storage (PostgreSQL)
+    existing_instances = pool.list_active()
+    if existing_instances:
+        workspace = existing_instances[0]
+        logger.info(f"Admin request using existing workspace: {workspace}")
+        return await pool.get(workspace)
+
+    # Fall back to default workspace if configured
+    if config.default_workspace:
+        logger.info(
+            f"Admin request using default workspace: {config.default_workspace}"
+        )
+        try:
+            return await pool.get(config.default_workspace)
+        except RuntimeError as e:
+            raise HTTPException(
+                status_code=503,
+                detail=f"No workspaces available and failed to create default: {str(e)}",
+            )
+
+    # No instances and no default - create a temporary admin workspace
+    # Note: must be a valid workspace ID (alphanumeric start)
+    admin_workspace = "admin-system"
+    logger.info(f"Admin request creating temporary workspace: {admin_workspace}")
+    try:
+        return await pool.get(admin_workspace)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to initialize admin workspace: {str(e)}",
         )
