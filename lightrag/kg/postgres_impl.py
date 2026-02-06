@@ -427,9 +427,7 @@ class PostgreSQLDB:
             Exception: Propagates the last error if all retry attempts fail or a non-transient error occurs.
         """
         # Use max of both retry limits since we'll check dynamically
-        max_attempts = max(
-            self.connection_retry_attempts, self.deadlock_retry_attempts
-        )
+        max_attempts = max(self.connection_retry_attempts, self.deadlock_retry_attempts)
 
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(max_attempts),
@@ -3919,7 +3917,9 @@ class PGDocStatusStorage(DocStatusStorage):
             if reclaimed_count > 0:
                 # Log workspaces affected if reclaiming across all
                 if not workspace and rows:
-                    workspaces_affected = set(row.get("workspace", "unknown") for row in rows)
+                    workspaces_affected = set(
+                        row.get("workspace", "unknown") for row in rows
+                    )
                     logger.warning(
                         f"Reclaimed {reclaimed_count} stale processing documents "
                         f"(>{stale_minutes}min) -> {target_status} in workspaces: {workspaces_affected}"
@@ -3987,7 +3987,9 @@ class PGDocStatusStorage(DocStatusStorage):
                 return False
 
         except Exception as e:
-            logger.error(f"[{self.workspace}] Failed to update heartbeat for {doc_id}: {e}")
+            logger.error(
+                f"[{self.workspace}] Failed to update heartbeat for {doc_id}: {e}"
+            )
             return False
 
     async def reset_failed_documents(
@@ -4029,18 +4031,10 @@ class PGDocStatusStorage(DocStatusStorage):
             }
 
         try:
-            # Build retry_count filter clause if max_retry_count is specified
-            # Documents without retry_count in metadata are treated as retry_count=0
-            retry_count_clause = ""
-            if max_retry_count is not None:
-                retry_count_clause = """
-                      AND (COALESCE((metadata->>'retry_count')::int, 0) <= $%d)
-                """
-
             # Reset failed documents, excluding duplicates (they can't be processed)
             if workspace:
                 if max_retry_count is not None:
-                    sql = f"""
+                    sql = """
                         UPDATE LIGHTRAG_DOC_STATUS
                         SET status = $1,
                             updated_at = NOW(),
@@ -4068,7 +4062,7 @@ class PGDocStatusStorage(DocStatusStorage):
                     params = [target_status, workspace]
             else:
                 if max_retry_count is not None:
-                    sql = f"""
+                    sql = """
                         UPDATE LIGHTRAG_DOC_STATUS
                         SET status = $1,
                             updated_at = NOW(),
@@ -4122,10 +4116,20 @@ class PGDocStatusStorage(DocStatusStorage):
                     skipped_permanently_failed = count_row["cnt"] if count_row else 0
 
             if reclaimed_count > 0:
-                retry_info = f" (max_retry_count={max_retry_count})" if max_retry_count is not None else ""
-                skip_info = f", {skipped_permanently_failed} permanently failed" if skipped_permanently_failed > 0 else ""
+                retry_info = (
+                    f" (max_retry_count={max_retry_count})"
+                    if max_retry_count is not None
+                    else ""
+                )
+                skip_info = (
+                    f", {skipped_permanently_failed} permanently failed"
+                    if skipped_permanently_failed > 0
+                    else ""
+                )
                 if not workspace and rows:
-                    workspaces_affected = set(row.get("workspace", "unknown") for row in rows)
+                    workspaces_affected = set(
+                        row.get("workspace", "unknown") for row in rows
+                    )
                     logger.info(
                         f"Reset {reclaimed_count} failed documents -> {target_status}{retry_info}{skip_info} "
                         f"in workspaces: {workspaces_affected}"

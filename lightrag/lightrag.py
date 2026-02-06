@@ -2321,8 +2321,14 @@ class LightRAG:
 
                                 # Create heartbeat callback for merge phase
                                 merge_heartbeat_callback = None
-                                if doc_id and hasattr(self.doc_status, "update_heartbeat"):
-                                    merge_heartbeat_callback = lambda doc=doc_id: self.doc_status.update_heartbeat(doc)
+                                if doc_id and hasattr(
+                                    self.doc_status, "update_heartbeat"
+                                ):
+
+                                    def merge_heartbeat_callback(
+                                        doc=doc_id,
+                                    ):
+                                        return self.doc_status.update_heartbeat(doc)
 
                                 # Use chunk_results from entity_relation_task
                                 await merge_nodes_and_edges(
@@ -2690,9 +2696,7 @@ class LightRAG:
                 file_path = claimed_doc.get("file_path", "unknown_source")
 
                 async with pipeline_status_lock:
-                    log_message = (
-                        f"Processing doc {doc_number}: {file_path} ({doc_id})"
-                    )
+                    log_message = f"Processing doc {doc_number}: {file_path} ({doc_id})"
                     logger.info(log_message)
                     pipeline_status["latest_message"] = log_message
                     pipeline_status["history_messages"].append(log_message)
@@ -2742,7 +2746,9 @@ class LightRAG:
                             doc_id: {
                                 "status": DocStatus.FAILED,
                                 "error_msg": error_msg[:1000],
-                                "content_summary": claimed_doc.get("content_summary", ""),
+                                "content_summary": claimed_doc.get(
+                                    "content_summary", ""
+                                ),
                                 "content_length": claimed_doc.get("content_length", 0),
                                 "file_path": file_path,
                                 "track_id": claimed_doc.get(
@@ -3013,7 +3019,9 @@ class LightRAG:
         # Create heartbeat callback for merge phase to prevent stale detection
         merge_heartbeat_callback = None
         if doc_id and hasattr(self.doc_status, "update_heartbeat"):
-            merge_heartbeat_callback = lambda doc=doc_id: self.doc_status.update_heartbeat(doc)
+
+            def merge_heartbeat_callback(doc=doc_id):
+                return self.doc_status.update_heartbeat(doc)
 
         # Use full merge_nodes_and_edges workflow (entity resolution, stored procedures, etc.)
         await merge_nodes_and_edges(
