@@ -1342,7 +1342,7 @@ class LightRAG:
 
             tasks = [
                 self.chunks_vdb.upsert(inserting_chunks),
-                self._process_extract_entities(inserting_chunks),
+                self._process_extract_entities(inserting_chunks, doc_id=doc_key),
                 self.full_docs.upsert(new_docs),
                 self.text_chunks.upsert(inserting_chunks),
             ]
@@ -1865,12 +1865,32 @@ class LightRAG:
             # NEW: Document-level claiming for true multi-instance parallelism
             # Each instance claims documents one by one using SELECT FOR UPDATE SKIP LOCKED
             # This allows multiple instances to work on DIFFERENT documents simultaneously
-            await self._process_with_document_claiming(
-                split_by_character,
-                split_by_character_only,
-                pipeline_status,
-                pipeline_status_lock,
-            )
+
+            # ATOMIC check-and-set to prevent race conditions when multiple cron calls
+            # arrive within milliseconds of each other (see logs showing 6+ "starting"
+            # messages within the same second from the same instance)
+            async with pipeline_status_lock:
+                if pipeline_status.get("busy", False):
+                    # Already processing - don't start another loop
+                    logger.debug(
+                        f"[{self.workspace}] Skipping: already processing documents"
+                    )
+                    return
+                # Set busy=True immediately within the same lock to prevent race
+                pipeline_status["busy"] = True
+
+            try:
+                await self._process_with_document_claiming(
+                    split_by_character,
+                    split_by_character_only,
+                    pipeline_status,
+                    pipeline_status_lock,
+                )
+            except Exception:
+                # Ensure busy is reset if function fails before its own finally block
+                async with pipeline_status_lock:
+                    pipeline_status["busy"] = False
+                raise
             return
 
         # FALLBACK: Original behavior for non-PostgreSQL storage (e.g., JSON)
@@ -2162,6 +2182,10 @@ class LightRAG:
                             # Execute first stage tasks
                             await asyncio.gather(*first_stage_tasks)
 
+                            # Send heartbeat after chunking to prevent stale detection during long processing
+                            if hasattr(self.doc_status, "update_heartbeat"):
+                                await self.doc_status.update_heartbeat(doc_id)
+
                             # Stage 2: Process entity relation graph (after text_chunks are saved)
                             entity_relation_task = asyncio.create_task(
                                 self._process_extract_entities(
@@ -2169,6 +2193,7 @@ class LightRAG:
                                     pipeline_status,
                                     pipeline_status_lock,
                                     token_tracker=token_tracker,
+                                    doc_id=doc_id,
                                 )
                             )
                             chunk_results = await entity_relation_task
@@ -2245,7 +2270,10 @@ class LightRAG:
                                 "dedup_output_tokens": 0,
                             }
 
-                            # Update document status to failed
+                            # Update document status to failed with incremented retry_count
+                            existing_retry_count = status_doc.metadata.get(
+                                "retry_count", 0
+                            )
                             await self.doc_status.upsert(
                                 {
                                     doc_id: {
@@ -2263,6 +2291,7 @@ class LightRAG:
                                             "processing_start_time": processing_start_time,
                                             "processing_end_time": processing_end_time,
                                             "token_usage": partial_token_usage,
+                                            "retry_count": existing_retry_count + 1,
                                         },
                                     }
                                 }
@@ -2270,6 +2299,10 @@ class LightRAG:
 
                         # Concurrency is controlled by keyed lock for individual entities and relationships
                         if file_extraction_stage_ok:
+                            # Send heartbeat after extraction to prevent stale detection during merge phase
+                            if hasattr(self.doc_status, "update_heartbeat"):
+                                await self.doc_status.update_heartbeat(doc_id)
+
                             # Create separate token tracker for deduplication/merge phase
                             dedup_token_tracker = TokenTracker()
                             try:
@@ -2285,6 +2318,11 @@ class LightRAG:
                                 # Build global_config with dedup token_tracker for merge phase
                                 merge_config = asdict(self)
                                 merge_config["token_tracker"] = dedup_token_tracker
+
+                                # Create heartbeat callback for merge phase
+                                merge_heartbeat_callback = None
+                                if doc_id and hasattr(self.doc_status, "update_heartbeat"):
+                                    merge_heartbeat_callback = lambda doc=doc_id: self.doc_status.update_heartbeat(doc)
 
                                 # Use chunk_results from entity_relation_task
                                 await merge_nodes_and_edges(
@@ -2304,6 +2342,7 @@ class LightRAG:
                                     current_file_number=current_file_number,
                                     total_files=total_files,
                                     file_path=file_path,
+                                    heartbeat_callback=merge_heartbeat_callback,
                                 )
 
                                 # Record processing end time
@@ -2445,7 +2484,10 @@ class LightRAG:
                                     ),
                                 }
 
-                                # Update document status to failed
+                                # Update document status to failed with incremented retry_count
+                                existing_retry_count = status_doc.metadata.get(
+                                    "retry_count", 0
+                                )
                                 await self.doc_status.upsert(
                                     {
                                         doc_id: {
@@ -2461,6 +2503,7 @@ class LightRAG:
                                                 "processing_start_time": processing_start_time,
                                                 "processing_end_time": processing_end_time,
                                                 "token_usage": partial_token_usage,
+                                                "retry_count": existing_retry_count + 1,
                                             },
                                         }
                                     }
@@ -2600,6 +2643,9 @@ class LightRAG:
         pending_count = await self.doc_status.get_pending_count()
         if pending_count == 0:
             logger.info(f"[{self.workspace}] No documents to process")
+            # Reset busy flag since we're returning early (it was set by caller)
+            async with pipeline_status_lock:
+                pipeline_status["busy"] = False
             return
 
         logger.info(
@@ -2625,6 +2671,98 @@ class LightRAG:
             del pipeline_status["history_messages"][:]
 
         processed_count = 0
+        active_tasks: set[asyncio.Task] = set()
+        # Use max_parallel_insert to control parallel document processing per instance
+        doc_semaphore = asyncio.Semaphore(self.max_parallel_insert)
+
+        logger.info(
+            f"[{self.workspace}] Using max_parallel_insert={self.max_parallel_insert} "
+            f"for parallel document processing"
+        )
+
+        async def process_doc_task(
+            doc_id: str,
+            claimed_doc: dict,
+            doc_number: int,
+        ) -> None:
+            """Process a single document within the semaphore limit."""
+            async with doc_semaphore:
+                file_path = claimed_doc.get("file_path", "unknown_source")
+
+                async with pipeline_status_lock:
+                    log_message = (
+                        f"Processing doc {doc_number}: {file_path} ({doc_id})"
+                    )
+                    logger.info(log_message)
+                    pipeline_status["latest_message"] = log_message
+                    pipeline_status["history_messages"].append(log_message)
+
+                processing_start_time = int(time.time())
+
+                try:
+                    await self._process_single_claimed_document(
+                        doc_id,
+                        claimed_doc,
+                        split_by_character,
+                        split_by_character_only,
+                        pipeline_status,
+                        pipeline_status_lock,
+                    )
+                except Exception as e:
+                    # Record processing end time for failed case
+                    processing_end_time = int(time.time())
+
+                    # Build partial token_usage from current context token tracker
+                    token_tracker = current_token_tracker.get()
+                    if token_tracker:
+                        llm_usage = token_tracker.get_llm_usage()
+                        embedding_usage = token_tracker.get_embedding_usage()
+                        partial_token_usage = {
+                            "embedding_tokens": embedding_usage.get("total_tokens", 0),
+                            "llm_input_tokens": llm_usage.get("prompt_tokens", 0),
+                            "llm_output_tokens": llm_usage.get("completion_tokens", 0),
+                            "total_chunks": 0,
+                            "embedding_model": embedding_usage.get("model"),
+                            "llm_model": llm_usage.get("model"),
+                            "dedup_input_tokens": 0,
+                            "dedup_output_tokens": 0,
+                        }
+                    else:
+                        partial_token_usage = {}
+
+                    # Mark document as failed
+                    error_msg = f"Processing failed: {str(e)}"
+                    logger.error(
+                        f"[{self.workspace}] Document {doc_id} failed: {error_msg}"
+                    )
+                    existing_metadata = claimed_doc.get("metadata", {})
+                    existing_retry_count = existing_metadata.get("retry_count", 0)
+                    await self.doc_status.upsert(
+                        {
+                            doc_id: {
+                                "status": DocStatus.FAILED,
+                                "error_msg": error_msg[:1000],
+                                "content_summary": claimed_doc.get("content_summary", ""),
+                                "content_length": claimed_doc.get("content_length", 0),
+                                "file_path": file_path,
+                                "track_id": claimed_doc.get(
+                                    "track_id"
+                                ),  # Preserve track_id
+                                "created_at": claimed_doc.get(
+                                    "created_at"
+                                ),  # Preserve created_at
+                                "updated_at": datetime.now(timezone.utc).isoformat(),
+                                "metadata": {
+                                    **claimed_doc.get("metadata", {}),
+                                    "processing_start_time": processing_start_time,
+                                    "processing_end_time": processing_end_time,
+                                    "token_usage": partial_token_usage,
+                                    "retry_count": existing_retry_count + 1,
+                                },
+                            }
+                        }
+                    )
+
         try:
             while True:
                 # Check for cancellation
@@ -2640,13 +2778,40 @@ class LightRAG:
                     )
                     break
 
+                # Clean up completed tasks
+                done_tasks = {t for t in active_tasks if t.done()}
+                for task in done_tasks:
+                    # Check for exceptions in completed tasks
+                    if task.exception():
+                        logger.error(f"Task failed with exception: {task.exception()}")
+                active_tasks -= done_tasks
+
+                # Wait if we've reached max parallel docs
+                if len(active_tasks) >= self.max_parallel_insert:
+                    # Wait for at least one task to complete
+                    done, _ = await asyncio.wait(
+                        active_tasks, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for task in done:
+                        if task.exception():
+                            logger.error(f"Task failed: {task.exception()}")
+                    active_tasks -= done
+
                 # Try to claim the next document
                 # This is atomic: uses SELECT FOR UPDATE SKIP LOCKED
                 claimed_doc = await self.doc_status.claim_next_document(instance_id)
 
                 if claimed_doc is None:
-                    # No more documents available (either none left, or all locked by other instances)
-                    # Check if there are still pending docs (being processed by others)
+                    # No more documents to claim - wait for active tasks to complete
+                    if active_tasks:
+                        logger.info(
+                            f"[{self.workspace}] No more docs to claim, waiting for "
+                            f"{len(active_tasks)} active tasks"
+                        )
+                        await asyncio.gather(*active_tasks, return_exceptions=True)
+                        active_tasks.clear()
+
+                    # Check if there are still pending docs
                     remaining = await self.doc_status.get_pending_count()
                     if remaining > 0:
                         logger.debug(
@@ -2657,87 +2822,32 @@ class LightRAG:
                         logger.info(f"[{self.workspace}] All documents processed")
                     break
 
-                # Process the claimed document
+                # Process the claimed document as a parallel task
                 doc_id = claimed_doc["id"]
-                file_path = claimed_doc.get("file_path", "unknown_source")
+                processed_count += 1
 
                 async with pipeline_status_lock:
-                    processed_count += 1
                     pipeline_status["cur_batch"] = processed_count
-                    log_message = (
-                        f"Processing doc {processed_count}: {file_path} ({doc_id})"
-                    )
-                    logger.info(log_message)
-                    pipeline_status["latest_message"] = log_message
-                    pipeline_status["history_messages"].append(log_message)
 
-                # Track processing start time for failed cases too
-                processing_start_time = int(time.time())
+                task = asyncio.create_task(
+                    process_doc_task(doc_id, claimed_doc, processed_count)
+                )
+                active_tasks.add(task)
 
-                try:
-                    # Process the document (similar to original process_document logic)
-                    await self._process_single_claimed_document(
-                        doc_id,
-                        claimed_doc,
-                        split_by_character,
-                        split_by_character_only,
-                        pipeline_status,
-                        pipeline_status_lock,
-                    )
-                except Exception as e:
-                    # Record processing end time for failed case
-                    processing_end_time = int(time.time())
+            # Wait for any remaining tasks
+            if active_tasks:
+                logger.info(
+                    f"[{self.workspace}] Waiting for {len(active_tasks)} remaining tasks"
+                )
+                await asyncio.gather(*active_tasks, return_exceptions=True)
 
-                    # Build partial token_usage from current context token tracker
-                    # (may have partial data if extraction started but merge failed)
-                    token_tracker = current_token_tracker.get()
-                    if token_tracker:
-                        llm_usage = token_tracker.get_llm_usage()
-                        embedding_usage = token_tracker.get_embedding_usage()
-                        partial_token_usage = {
-                            "embedding_tokens": embedding_usage.get("total_tokens", 0),
-                            "llm_input_tokens": llm_usage.get("prompt_tokens", 0),
-                            "llm_output_tokens": llm_usage.get("completion_tokens", 0),
-                            "total_chunks": 0,  # Unknown on failure
-                            "embedding_model": embedding_usage.get("model"),
-                            "llm_model": llm_usage.get("model"),
-                            "dedup_input_tokens": 0,
-                            "dedup_output_tokens": 0,
-                        }
-                    else:
-                        partial_token_usage = {}
-
-                    # Mark document as failed with timing and partial token usage
-                    error_msg = f"Processing failed: {str(e)}"
-                    logger.error(
-                        f"[{self.workspace}] Document {doc_id} failed: {error_msg}"
-                    )
-                    await self.doc_status.upsert(
-                        {
-                            doc_id: {
-                                "status": DocStatus.FAILED,
-                                "error_msg": error_msg[:1000],  # Truncate long errors
-                                "content_summary": claimed_doc.get(
-                                    "content_summary", ""
-                                ),
-                                "content_length": claimed_doc.get("content_length", 0),
-                                "file_path": file_path,
-                                "track_id": claimed_doc.get(
-                                    "track_id"
-                                ),  # Preserve track_id
-                                "created_at": claimed_doc.get(
-                                    "created_at"
-                                ),  # Preserve created_at
-                                "updated_at": datetime.now(timezone.utc).isoformat(),
-                                "metadata": {
-                                    **claimed_doc.get("metadata", {}),
-                                    "processing_start_time": processing_start_time,
-                                    "processing_end_time": processing_end_time,
-                                    "token_usage": partial_token_usage,
-                                },
-                            }
-                        }
-                    )
+        except Exception as e:
+            logger.error(f"[{self.workspace}] Pipeline error: {e}")
+            # Cancel any remaining tasks
+            for task in active_tasks:
+                if not task.done():
+                    task.cancel()
+            raise
 
         finally:
             log_message = (
@@ -2866,6 +2976,10 @@ class LightRAG:
             self.chunks_vdb.upsert(chunks),
         )
 
+        # Send heartbeat after chunking to prevent stale detection during long processing
+        if hasattr(self.doc_status, "update_heartbeat"):
+            await self.doc_status.update_heartbeat(doc_id)
+
         # Extract entities and relationships
         try:
             chunk_results = await self._process_extract_entities(
@@ -2873,9 +2987,14 @@ class LightRAG:
                 pipeline_status=pipeline_status,
                 pipeline_status_lock=pipeline_status_lock,
                 token_tracker=token_tracker,
+                doc_id=doc_id,
             )
         except Exception as e:
             raise Exception(f"Entity extraction failed: {str(e)}")
+
+        # Send heartbeat after extraction to prevent stale detection during merge phase
+        if hasattr(self.doc_status, "update_heartbeat"):
+            await self.doc_status.update_heartbeat(doc_id)
 
         # Check for cancellation before processing results
         async with pipeline_status_lock:
@@ -2890,6 +3009,11 @@ class LightRAG:
         # Build global_config with dedup token_tracker for merge phase
         merge_config = asdict(self)
         merge_config["token_tracker"] = dedup_token_tracker
+
+        # Create heartbeat callback for merge phase to prevent stale detection
+        merge_heartbeat_callback = None
+        if doc_id and hasattr(self.doc_status, "update_heartbeat"):
+            merge_heartbeat_callback = lambda doc=doc_id: self.doc_status.update_heartbeat(doc)
 
         # Use full merge_nodes_and_edges workflow (entity resolution, stored procedures, etc.)
         await merge_nodes_and_edges(
@@ -2909,6 +3033,7 @@ class LightRAG:
             current_file_number=1,
             total_files=1,
             file_path=file_path,
+            heartbeat_callback=merge_heartbeat_callback,
         )
 
         # Calculate processing time
@@ -2979,12 +3104,21 @@ class LightRAG:
         pipeline_status=None,
         pipeline_status_lock=None,
         token_tracker: TokenTracker = None,
+        doc_id: str = None,
     ) -> list:
         try:
             # Build global_config with token_tracker included
             config = asdict(self)
             if token_tracker is not None:
                 config["token_tracker"] = token_tracker
+
+            # Add heartbeat callback to prevent stale detection during long extraction
+            # The callback will be called periodically during chunk processing
+            if doc_id and hasattr(self.doc_status, "update_heartbeat"):
+                config["heartbeat_callback"] = lambda: self.doc_status.update_heartbeat(
+                    doc_id
+                )
+
             chunk_results = await extract_entities(
                 chunk,
                 global_config=config,
