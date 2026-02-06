@@ -99,8 +99,12 @@ class InstanceRegistry:
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._drain_poll_task: Optional[asyncio.Task] = None
         self._running = False
-        self._unregistered = False  # Track if already unregistered (for SIGTERM handling)
-        self._was_draining = False  # Track previous drain state for cancellation detection
+        self._unregistered = (
+            False  # Track if already unregistered (for SIGTERM handling)
+        )
+        self._was_draining = (
+            False  # Track previous drain state for cancellation detection
+        )
 
         # Callback for when drain status changes (requested or cancelled)
         self._on_drain_requested: Optional[callable] = None
@@ -481,9 +485,7 @@ class InstanceRegistry:
 
                 elif not drain_requested and self._was_draining:
                     # Transition: draining -> not draining (drain cancelled)
-                    logger.info(
-                        f"Drain cancelled for instance {self.instance_id}"
-                    )
+                    logger.info(f"Drain cancelled for instance {self.instance_id}")
                     if self._on_drain_requested:
                         self._on_drain_requested(False, None)
                     self._was_draining = False

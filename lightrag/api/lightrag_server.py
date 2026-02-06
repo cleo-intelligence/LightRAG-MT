@@ -215,10 +215,8 @@ async def _metrics_collector_loop() -> None:
                             failed_docs = await rag.doc_status.get_docs_by_status(
                                 DocStatus.FAILED
                             )
-                            preprocessed_docs = (
-                                await rag.doc_status.get_docs_by_status(
-                                    DocStatus.PREPROCESSED
-                                )
+                            preprocessed_docs = await rag.doc_status.get_docs_by_status(
+                                DocStatus.PREPROCESSED
                             )
 
                             total_pending += len(pending_docs) if pending_docs else 0
@@ -241,17 +239,13 @@ async def _metrics_collector_loop() -> None:
                             if hasattr(kg, "get_node_count"):
                                 try:
                                     node_count = await kg.get_node_count()
-                                    total_graph_nodes += (
-                                        node_count if node_count else 0
-                                    )
+                                    total_graph_nodes += node_count if node_count else 0
                                 except Exception:
                                     pass
                             if hasattr(kg, "get_edge_count"):
                                 try:
                                     edge_count = await kg.get_edge_count()
-                                    total_graph_edges += (
-                                        edge_count if edge_count else 0
-                                    )
+                                    total_graph_edges += edge_count if edge_count else 0
                                 except Exception:
                                     pass
                     except Exception as e:
@@ -2312,9 +2306,7 @@ def create_app(args):
 
         # Cache observability metric
         cache_age = (
-            _time.monotonic() - cache["last_updated"]
-            if cache["populated"]
-            else -1
+            _time.monotonic() - cache["last_updated"] if cache["populated"] else -1
         )
         metrics_lines.extend(
             [

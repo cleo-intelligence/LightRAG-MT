@@ -427,7 +427,9 @@ async def get_rag_for_admin(request: Request) -> object:
 
     # Fall back to default workspace if configured
     if config.default_workspace:
-        logger.info(f"Admin request using default workspace: {config.default_workspace}")
+        logger.info(
+            f"Admin request using default workspace: {config.default_workspace}"
+        )
         try:
             return await pool.get(config.default_workspace)
         except RuntimeError as e:

@@ -34,7 +34,11 @@ from lightrag.utils import (
 from lightrag.exceptions import PipelineNotInitializedError
 from lightrag.operate import rebuild_knowledge_from_chunks
 from lightrag.api.utils_api import get_combined_auth_dependency
-from lightrag.api.workspace_manager import get_rag, get_rag_for_admin, get_workspace_pool
+from lightrag.api.workspace_manager import (
+    get_rag,
+    get_rag_for_admin,
+    get_workspace_pool,
+)
 from ..config import global_args
 
 
