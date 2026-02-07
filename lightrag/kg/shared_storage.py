@@ -1739,7 +1739,10 @@ def is_any_pipeline_busy() -> dict:
                     else:
                         workspace_id = "(default)"
                     busy_workspaces.append(workspace_id)
-                    total_docs += pipeline_data.get("docs", 0)
+                    # Count remaining docs (total - completed)
+                    batch_total = pipeline_data.get("docs", 0)
+                    completed = pipeline_data.get("cur_batch", 0)
+                    total_docs += max(batch_total - completed, 0)
             except Exception:
                 # Ignore errors accessing individual namespaces
                 pass
