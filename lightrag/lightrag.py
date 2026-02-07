@@ -2637,6 +2637,8 @@ class LightRAG:
             # Always reset busy status and cancellation flag when done or if an exception occurs (with lock)
             async with pipeline_status_lock:
                 pipeline_status["busy"] = False
+                pipeline_status["docs"] = 0
+                pipeline_status["cur_batch"] = 0
                 pipeline_status["cancellation_requested"] = (
                     False  # Always reset cancellation flag
                 )
@@ -2886,6 +2888,8 @@ class LightRAG:
             logger.info(f"[{self.workspace}] {log_message}")
             async with pipeline_status_lock:
                 pipeline_status["busy"] = False
+                pipeline_status["docs"] = 0
+                pipeline_status["cur_batch"] = 0
                 pipeline_status["cancellation_requested"] = False
                 pipeline_status["latest_message"] = log_message
                 pipeline_status["history_messages"].append(log_message)
@@ -4796,6 +4800,8 @@ class LightRAG:
             if we_acquired_pipeline:
                 async with pipeline_status_lock:
                     pipeline_status["busy"] = False
+                    pipeline_status["docs"] = 0
+                    pipeline_status["cur_batch"] = 0
                     pipeline_status["cancellation_requested"] = False
                     completion_msg = (
                         f"Deletion process completed for document: {doc_id}"
