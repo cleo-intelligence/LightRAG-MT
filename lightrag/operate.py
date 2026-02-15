@@ -76,6 +76,7 @@ from lightrag.constants import (
 from lightrag.kg.shared_storage import get_storage_keyed_lock
 from lightrag.entity_resolution import EntityResolver
 from lightrag.conflict_detection import ConflictDetector
+import random
 import time
 from dotenv import load_dotenv
 
@@ -3751,7 +3752,7 @@ async def merge_nodes_and_edges(
             async with get_storage_keyed_lock(
                 [entity_name], namespace=namespace, enable_logging=False
             ):
-                max_retries = 3
+                max_retries = 5
                 for attempt in range(1, max_retries + 1):
                     try:
                         logger.debug(f"Processing entity {entity_name}")
@@ -3774,10 +3775,14 @@ async def merge_nodes_and_edges(
                         raise  # Never retry user cancellation
 
                     except Exception as e:
+                        is_deadlock = "deadlock" in str(e).lower()
                         if attempt < max_retries:
-                            wait_time = min(2**attempt, 5)
+                            base_wait = min(2**attempt, 8)
+                            jitter = random.uniform(0, base_wait * 0.5)
+                            wait_time = base_wait + jitter
+                            label = "deadlock" if is_deadlock else "error"
                             logger.warning(
-                                f"Entity `{entity_name}` merge failed (attempt {attempt}/{max_retries}): {e} — retrying in {wait_time}s"
+                                f"Entity `{entity_name}` merge {label} (attempt {attempt}/{max_retries}): {e} — retrying in {wait_time:.1f}s"
                             )
                             await asyncio.sleep(wait_time)
                         else:
@@ -3883,7 +3888,7 @@ async def merge_nodes_and_edges(
                 namespace=namespace,
                 enable_logging=False,
             ):
-                max_retries = 3
+                max_retries = 5
                 for attempt in range(1, max_retries + 1):
                     try:
                         added_entities = []  # Track entities added during edge processing
@@ -3915,10 +3920,14 @@ async def merge_nodes_and_edges(
                         raise  # Never retry user cancellation
 
                     except Exception as e:
+                        is_deadlock = "deadlock" in str(e).lower()
                         if attempt < max_retries:
-                            wait_time = min(2**attempt, 5)
+                            base_wait = min(2**attempt, 8)
+                            jitter = random.uniform(0, base_wait * 0.5)
+                            wait_time = base_wait + jitter
+                            label = "deadlock" if is_deadlock else "error"
                             logger.warning(
-                                f"Relation {sorted_edge_key} merge failed (attempt {attempt}/{max_retries}): {e} — retrying in {wait_time}s"
+                                f"Relation {sorted_edge_key} merge {label} (attempt {attempt}/{max_retries}): {e} — retrying in {wait_time:.1f}s"
                             )
                             await asyncio.sleep(wait_time)
                         else:
