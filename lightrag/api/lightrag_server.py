@@ -215,6 +215,7 @@ async def _metrics_collector_loop() -> None:
             total_processing = 0
             total_processed = 0
             total_failed = 0
+            total_duplicate = 0
             total_preprocessed = 0
             total_graph_nodes = 0
             total_graph_edges = 0
@@ -229,6 +230,7 @@ async def _metrics_collector_loop() -> None:
                         total_processing = docs.get("processing", 0)
                         total_processed = docs.get("processed", 0)
                         total_failed = docs.get("failed", 0)
+                        total_duplicate = docs.get("duplicate", 0)
                         total_preprocessed = docs.get("preprocessed", 0)
 
                         graph = metrics.get("graph", {})
@@ -263,6 +265,9 @@ async def _metrics_collector_loop() -> None:
                             preprocessed_docs = await rag.doc_status.get_docs_by_status(
                                 DocStatus.PREPROCESSED
                             )
+                            duplicate_docs = await rag.doc_status.get_docs_by_status(
+                                DocStatus.DUPLICATE
+                            )
 
                             total_pending += len(pending_docs) if pending_docs else 0
                             total_processing += (
@@ -272,6 +277,9 @@ async def _metrics_collector_loop() -> None:
                                 len(processed_docs) if processed_docs else 0
                             )
                             total_failed += len(failed_docs) if failed_docs else 0
+                            total_duplicate += (
+                                len(duplicate_docs) if duplicate_docs else 0
+                            )
                             total_preprocessed += (
                                 len(preprocessed_docs) if preprocessed_docs else 0
                             )
@@ -331,6 +339,7 @@ async def _metrics_collector_loop() -> None:
                     "total_processing": total_processing,
                     "total_processed": total_processed,
                     "total_failed": total_failed,
+                    "total_duplicate": total_duplicate,
                     "total_preprocessed": total_preprocessed,
                     "total_graph_nodes": total_graph_nodes,
                     "total_graph_edges": total_graph_edges,
@@ -2194,6 +2203,7 @@ def create_app(args):
             total_processing = cache["total_processing"]
             total_processed = cache["total_processed"]
             total_failed = cache["total_failed"]
+            total_duplicate = cache.get("total_duplicate", 0)
             total_preprocessed = cache["total_preprocessed"]
             total_graph_nodes = cache["total_graph_nodes"]
             total_graph_edges = cache["total_graph_edges"]
@@ -2209,6 +2219,7 @@ def create_app(args):
             total_processing = 0
             total_processed = 0
             total_failed = 0
+            total_duplicate = 0
             total_preprocessed = 0
             total_graph_nodes = 0
             total_graph_edges = 0
@@ -2222,13 +2233,13 @@ def create_app(args):
         # --- In-memory metrics: always collected live (zero DB cost) ---
         pipeline_status = is_any_pipeline_busy()
         busy_pipeline_count = len(pipeline_status.get("busy_workspaces", []))
-        queue_depth = total_pending + total_failed
+        queue_depth = total_pending
 
         # Build Prometheus metrics output
         metrics_lines = [
             "# ====== AUTOSCALING METRICS (Primary) ======",
             "",
-            "# HELP lightrag_queue_depth Number of documents pending processing (pending + failed)",
+            "# HELP lightrag_queue_depth Number of documents pending processing",
             "# TYPE lightrag_queue_depth gauge",
             f'lightrag_queue_depth{{workspace="all"}} {queue_depth}',
             "",
@@ -2253,6 +2264,10 @@ def create_app(args):
             "# HELP lightrag_failed_count Documents in failed status",
             "# TYPE lightrag_failed_count gauge",
             f'lightrag_failed_count{{workspace="all"}} {total_failed}',
+            "",
+            "# HELP lightrag_duplicate_count Documents rejected as duplicates",
+            "# TYPE lightrag_duplicate_count gauge",
+            f'lightrag_duplicate_count{{workspace="all"}} {total_duplicate}',
             "",
             "# HELP lightrag_preprocessed_count Documents in preprocessed status",
             "# TYPE lightrag_preprocessed_count gauge",
