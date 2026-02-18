@@ -1534,7 +1534,7 @@ class LightRAG:
                 # Create a new record with unique ID for this duplicate attempt
                 dup_record_id = compute_mdhash_id(f"{doc_id}-{track_id}", prefix="dup-")
                 duplicate_docs[dup_record_id] = {
-                    "status": DocStatus.FAILED,
+                    "status": DocStatus.DUPLICATE,
                     "content_summary": f"[DUPLICATE] Original document: {doc_id}",
                     "content_length": new_docs.get(doc_id, {}).get("content_length", 0),
                     "created_at": datetime.now(timezone.utc).isoformat(),

@@ -683,6 +683,7 @@ class DocStatus(str, Enum):
     PREPROCESSED = "preprocessed"
     PROCESSED = "processed"
     FAILED = "failed"
+    DUPLICATE = "duplicate"
 
 
 @dataclass
