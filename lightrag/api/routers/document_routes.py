@@ -306,7 +306,7 @@ class InsertResponse(BaseModel):
     track_id: str = Field(description="Tracking ID for monitoring processing status")
     doc_id: Optional[str] = Field(
         default=None,
-        description="Document ID (for duplicates: the original doc_id)",
+        description="Document ID (content hash). Returned on success for /text and /texts, and for duplicates/in_progress on all endpoints.",
     )
     original_status: Optional[str] = Field(
         default=None,
@@ -317,8 +317,9 @@ class InsertResponse(BaseModel):
         json_schema_extra = {
             "example": {
                 "status": "success",
-                "message": "File 'document.pdf' uploaded successfully. Processing will continue in background.",
-                "track_id": "upload_20250729_170612_abc123",
+                "message": "Text successfully received. Processing will continue in background.",
+                "track_id": "insert_20250729_170612_abc123",
+                "doc_id": "doc-2857eb8150139390a7f5fb820b6dfd58",
             }
         }
 
@@ -2746,6 +2747,7 @@ def create_document_routes(doc_manager: DocumentManager, api_key: Optional[str] 
                 status="success",
                 message="Text successfully received. Processing will continue in background.",
                 track_id=track_id,
+                doc_id=doc_id,
             )
         except Exception as e:
             logger.error(f"Error /documents/text: {str(e)}")
