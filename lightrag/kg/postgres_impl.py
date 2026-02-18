@@ -3826,18 +3826,15 @@ class PGDocStatusStorage(DocStatusStorage):
                 }
 
     async def get_pending_count(self) -> int:
-        """Get count of pending/failed documents waiting to be processed.
+        """Get count of pending documents waiting to be processed.
 
         Useful for checking if there's work to do before entering the processing loop.
-        Excludes duplicate documents (is_duplicate: true) which have no content.
         """
         sql = """
             SELECT COUNT(*) as cnt
             FROM LIGHTRAG_DOC_STATUS
             WHERE workspace = $1
-              AND status IN ('pending', 'failed')
-              AND (metadata->>'is_duplicate' IS NULL
-                   OR metadata->>'is_duplicate' != 'true')
+              AND status = 'pending'
         """
         result = await self.db.query(sql, [self.workspace], multirows=False)
         return result.get("cnt", 0) if result else 0

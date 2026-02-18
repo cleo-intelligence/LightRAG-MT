@@ -22,20 +22,19 @@ BEGIN
         'processing', COALESCE(SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END), 0),
         'processed', COALESCE(SUM(CASE WHEN status = 'processed' THEN 1 ELSE 0 END), 0),
         'failed', COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0),
+        'duplicate', COALESCE(SUM(CASE WHEN status = 'duplicate' THEN 1 ELSE 0 END), 0),
         'preprocessed', COALESCE(SUM(CASE WHEN status = 'preprocessed' THEN 1 ELSE 0 END), 0)
     )
     INTO v_doc_stats
     FROM LIGHTRAG_DOC_STATUS
     WHERE p_workspace IS NULL OR workspace = p_workspace;
 
-    -- Queue depth: pending + failed documents EXCLUDING duplicates
-    -- Duplicates are not processable (they have no content in full_docs)
+    -- Queue depth: only pending documents (awaiting processing)
     SELECT COALESCE(COUNT(*), 0)
     INTO v_queue_depth
     FROM LIGHTRAG_DOC_STATUS
     WHERE (p_workspace IS NULL OR workspace = p_workspace)
-      AND status IN ('pending', 'failed')
-      AND (metadata->>'is_duplicate' IS NULL OR metadata->>'is_duplicate' != 'true');
+      AND status = 'pending';
 
     -- Graph metrics (nodes and edges)
     SELECT jsonb_build_object(
