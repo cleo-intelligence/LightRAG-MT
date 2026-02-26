@@ -920,7 +920,19 @@ def create_app(args):
             )
         else:
             # For other endpoints, return the default FastAPI validation error
-            return JSONResponse(status_code=422, content={"detail": exc.errors()})
+            # Convert errors to JSON-serializable format (ctx may contain non-serializable objects)
+            errors = []
+            for err in exc.errors():
+                clean_err = {
+                    "type": err.get("type"),
+                    "loc": err.get("loc"),
+                    "msg": err.get("msg"),
+                    "input": str(err.get("input"))
+                    if err.get("input") is not None
+                    else None,
+                }
+                errors.append(clean_err)
+            return JSONResponse(status_code=422, content={"detail": errors})
 
     def get_cors_origins():
         """Get allowed origins from global_args
