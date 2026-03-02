@@ -1871,9 +1871,10 @@ class LightRAG:
             # messages within the same second from the same instance)
             async with pipeline_status_lock:
                 if pipeline_status.get("busy", False):
-                    # Already processing - don't start another loop
+                    # Already processing - flag for re-check when current run finishes
+                    pipeline_status["request_pending"] = True
                     logger.debug(
-                        f"[{self.workspace}] Skipping: already processing documents"
+                        f"[{self.workspace}] Pipeline busy, flagged for re-check after current run"
                     )
                     return
                 # Set busy=True immediately within the same lock to prevent race
@@ -2843,9 +2844,23 @@ class LightRAG:
                         await asyncio.gather(*active_tasks, return_exceptions=True)
                         active_tasks.clear()
 
-                    # Check if there are still pending docs
+                    # Check if new documents were queued during processing
+                    has_pending_request = False
+                    async with pipeline_status_lock:
+                        has_pending_request = pipeline_status.get(
+                            "request_pending", False
+                        )
+                        if has_pending_request:
+                            pipeline_status["request_pending"] = False
+
                     remaining = await self.doc_status.get_pending_count()
                     if remaining > 0:
+                        if has_pending_request:
+                            logger.info(
+                                f"[{self.workspace}] New documents queued during processing, "
+                                f"continuing with {remaining} pending docs"
+                            )
+                            continue  # Re-enter claiming loop
                         logger.debug(
                             f"[{self.workspace}] No claimable docs, {remaining} still pending "
                             f"(likely being processed by other instances)"
