@@ -2844,26 +2844,36 @@ class LightRAG:
                         await asyncio.gather(*active_tasks, return_exceptions=True)
                         active_tasks.clear()
 
-                    # Check if new documents were queued during processing
-                    has_pending_request = False
+                    # Check if there are still pending documents to process
+                    # (from new inserts, reclaimed stale docs, or any other source)
                     async with pipeline_status_lock:
-                        has_pending_request = pipeline_status.get(
-                            "request_pending", False
-                        )
-                        if has_pending_request:
-                            pipeline_status["request_pending"] = False
+                        pipeline_status["request_pending"] = False
 
                     remaining = await self.doc_status.get_pending_count()
                     if remaining > 0:
-                        if has_pending_request:
+                        # Try to claim — if all pending docs are locked by other
+                        # instances, claim returns None and we'll exit next iteration.
+                        # Guard against repeated no-claim loops (e.g. unclaimed docs
+                        # that don't match claim filters).
+                        probe = await self.doc_status.claim_next_document(instance_id)
+                        if probe is not None:
                             logger.info(
-                                f"[{self.workspace}] New documents queued during processing, "
-                                f"continuing with {remaining} pending docs"
+                                f"[{self.workspace}] {remaining} pending docs remaining, "
+                                f"re-entering claiming loop"
                             )
+                            # Process the probed doc immediately
+                            doc_id = probe["id"]
+                            processed_count += 1
+                            async with pipeline_status_lock:
+                                pipeline_status["cur_batch"] = processed_count
+                            task = asyncio.create_task(
+                                process_doc_task(doc_id, probe, processed_count)
+                            )
+                            active_tasks.add(task)
                             continue  # Re-enter claiming loop
                         logger.debug(
-                            f"[{self.workspace}] No claimable docs, {remaining} still pending "
-                            f"(likely being processed by other instances)"
+                            f"[{self.workspace}] {remaining} pending docs but none claimable "
+                            f"(locked by other instances or filtered)"
                         )
                     else:
                         logger.info(f"[{self.workspace}] All documents processed")
