@@ -10,8 +10,7 @@ The app is the real one from create_app(), on offline storages, with the
 production auth settings: LIGHTRAG_API_KEY set, WHITELIST_PATHS=/health, with
 and without AUTH_ACCOUNTS.
 
-- no key or a wrong key (and a guest token, when AUTH_ACCOUNTS is set):
-  401/403 and the endpoint never runs;
+- no key, a wrong key or a guest token: 401/403 and the endpoint never runs;
 - valid key: the endpoint answers as before.
 """
 
@@ -118,6 +117,12 @@ def client(request, app, monkeypatch):
 @pytest.fixture
 def accounts_client(app, monkeypatch):
     _use_production_auth(monkeypatch, dict(ACCOUNTS))
+    return TestClient(app)
+
+
+@pytest.fixture
+def key_only_client(app, monkeypatch):
+    _use_production_auth(monkeypatch, {})
     return TestClient(app)
 
 
@@ -232,17 +237,42 @@ def test_ops_route_refused_without_valid_key(
 
 
 @pytest.mark.parametrize("method,path,kwargs", OPS_ROUTES, ids=OPS_ROUTE_IDS)
-def test_ops_route_refuses_guest_token(
-    accounts_client, ops_backend, method, path, kwargs
-):
+def test_ops_route_refuses_guest_token(client, ops_backend, method, path, kwargs):
     guest_token = auth_handler.create_token(username="guest", role="guest")
 
-    response = accounts_client.request(
+    response = client.request(
         method, path, headers={"Authorization": f"Bearer {guest_token}"}, **kwargs
     )
 
-    assert response.status_code == 401
+    assert response.status_code in (401, 403)
     assert_endpoint_not_run(ops_backend)
+
+
+def test_guest_token_from_auth_status_does_not_replace_the_key(
+    key_only_client, ops_backend
+):
+    """Without AUTH_ACCOUNTS, /auth-status hands a guest token to anyone."""
+    guest_token = key_only_client.get("/auth-status").json()["access_token"]
+
+    response = key_only_client.post(
+        "/drain",
+        params={"enable": "true"},
+        headers={"Authorization": f"Bearer {guest_token}"},
+    )
+
+    assert response.status_code == 403
+    assert_endpoint_not_run(ops_backend)
+
+
+def test_guest_token_alongside_the_key_is_ignored(key_only_client):
+    """With an API key configured, the key decides, not the guest token."""
+    guest_token = auth_handler.create_token(username="guest", role="guest")
+
+    response = key_only_client.get(
+        "/drain", headers={"Authorization": f"Bearer {guest_token}", **WITH_KEY}
+    )
+
+    assert response.status_code == 200
 
 
 def test_no_other_route_answers_without_key(app, client):
