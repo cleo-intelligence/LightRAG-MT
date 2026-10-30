@@ -219,7 +219,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     region: frankfurt
-    plan: standard  # 1GB RAM, 0.5 CPU - sufficient for dev/testing
+    plan: standard  # 2 GB RAM, 1 CPU
     branch: dev
 
     healthCheckPath: /health
@@ -287,7 +287,7 @@ services:
       - key: POSTGRES_STATEMENT_CACHE_SIZE
         value: "0"
       - key: POSTGRES_MAX_CONNECTIONS
-        value: "50"  # Lower for dev
+        value: "20"
       - key: POSTGRES_MAX_INACTIVE_CONNECTION_LIFETIME
         value: "60"
       - key: POSTGRES_CONNECTION_RETRY_ATTEMPTS
@@ -325,7 +325,7 @@ services:
       - key: EMBEDDING_BATCH_NUM
         value: "60"
       - key: EMBEDDING_FUNC_MAX_ASYNC
-        value: "32"
+        value: "8"
       - key: EMBEDDING_BINDING_API_KEY
         sync: false
 
@@ -384,12 +384,16 @@ services:
         value: "20"
 
       #############################
-      # Performance Configuration (reduced for dev)
+      # Performance Configuration
+      # Bounded for the Standard plan (2 GB, 1 CPU): per-workspace limits,
+      # there is no process-wide cap.
       #############################
       - key: MAX_ASYNC
-        value: "128"
+        value: "32"
       - key: MAX_PARALLEL_INSERT
-        value: "16"
+        value: "4"
+      - key: LIGHTRAG_METRICS_REFRESH_INTERVAL
+        value: "120"  # Cleo reads /metrics every 2 min
       - key: MAX_GRAPH_NODES
         value: "1000"
       - key: MIN_DEGREE_FOR_GRAPH_BFS
