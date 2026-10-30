@@ -1864,6 +1864,7 @@ def create_app(args):
 
     @app.get(
         "/ready",
+        dependencies=[Depends(combined_auth)],
         summary="Readiness check for autoscaling",
         description=(
             "Returns 200 if the instance is ready to accept new work, "
@@ -1943,6 +1944,7 @@ def create_app(args):
 
     @app.get(
         "/drain",
+        dependencies=[Depends(combined_auth)],
         summary="Get drain mode status",
         description=(
             "Returns the current drain mode status. When drain mode is enabled, "
@@ -1970,6 +1972,7 @@ def create_app(args):
 
     @app.post(
         "/drain",
+        dependencies=[Depends(combined_auth)],
         summary="Enable or disable drain mode",
         description=(
             "Enable drain mode to stop accepting new document processing jobs. "
@@ -2026,6 +2029,7 @@ def create_app(args):
 
     @app.get(
         "/instances",
+        dependencies=[Depends(combined_auth)],
         summary="List all registered instances",
         description=(
             "Returns the status of all registered LightRAG instances. "
@@ -2063,6 +2067,7 @@ def create_app(args):
 
     @app.get(
         "/drain/status",
+        dependencies=[Depends(combined_auth)],
         summary="Get aggregated drain status for autoscaling",
         description=(
             "Returns aggregated status across all instances, including whether "
@@ -2104,6 +2109,7 @@ def create_app(args):
 
     @app.post(
         "/drain/request",
+        dependencies=[Depends(combined_auth)],
         summary="Request drain for N instances",
         description=(
             "Request drain for N instances (excluding the oldest/primary). "
@@ -2143,6 +2149,7 @@ def create_app(args):
 
     @app.post(
         "/drain/cancel",
+        dependencies=[Depends(combined_auth)],
         summary="Cancel all drain requests",
         description=(
             "Cancel all pending drain requests. Use this to rollback "
@@ -2172,6 +2179,7 @@ def create_app(args):
 
     @app.get(
         "/metrics",
+        dependencies=[Depends(combined_auth)],
         summary="Prometheus metrics for autoscaling",
         description=(
             "Returns Prometheus-format metrics for queue depth, processing status, "
@@ -2415,6 +2423,7 @@ def create_app(args):
 
     @app.get(
         "/metrics/all",
+        dependencies=[Depends(combined_auth)],
         summary="Aggregated metrics from all instances",
         description=(
             "Returns per-instance metrics and aggregated totals across all "
