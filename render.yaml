@@ -86,7 +86,7 @@ services:
       - key: POSTGRES_STATEMENT_CACHE_SIZE
         value: "0"
       - key: POSTGRES_MAX_CONNECTIONS
-        value: "100"
+        sync: false  # Tuned in Render Dashboard: Blueprint syncs keep it
       - key: POSTGRES_MAX_INACTIVE_CONNECTION_LIFETIME
         value: "60"
       - key: POSTGRES_CONNECTION_RETRY_ATTEMPTS
@@ -202,6 +202,13 @@ services:
       # API Security
       #############################
       - key: LIGHTRAG_API_KEY
+        sync: false
+      # Login accounts + JWT signing secret, set on the Render services only:
+      # Blueprint syncs never set nor restore sync: false values. Keep both
+      # set: AUTH_ACCOUNTS without TOKEN_SECRET lets anyone forge a login token.
+      - key: AUTH_ACCOUNTS
+        sync: false
+      - key: TOKEN_SECRET
         sync: false
 
   #############################
@@ -396,4 +403,11 @@ services:
       # API Security
       #############################
       - key: LIGHTRAG_API_KEY
+        sync: false
+      # Login accounts + JWT signing secret, set on the Render services only:
+      # Blueprint syncs never set nor restore sync: false values. Keep both
+      # set: AUTH_ACCOUNTS without TOKEN_SECRET lets anyone forge a login token.
+      - key: AUTH_ACCOUNTS
+        sync: false
+      - key: TOKEN_SECRET
         sync: false
