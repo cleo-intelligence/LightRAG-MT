@@ -93,7 +93,9 @@ def get_combined_auth_dependency(api_key: Optional[str] = None):
         else Security(api_key_header),
     ):
         # 1. Check if path is in whitelist
-        path = request.url.path
+        # Use the routed path: request.url is rebuilt from the Host header,
+        # which a client can craft to make any path look whitelisted.
+        path = request.scope["path"]
         for pattern, is_prefix in whitelist_patterns:
             if (is_prefix and path.startswith(pattern)) or (
                 not is_prefix and path == pattern
@@ -104,18 +106,24 @@ def get_combined_auth_dependency(api_key: Optional[str] = None):
         if token:
             try:
                 token_info = auth_handler.validate_token(token)
-                # Accept guest token if no auth is configured
+                # A token only authenticates when it matches the configured auth mode:
+                #   - password auth (AUTH_ACCOUNTS set): accept non-guest user tokens
+                #   - fully open (no AUTH_ACCOUNTS, no API key): accept guest tokens
+                # With an API key but no AUTH_ACCOUNTS, anyone can get a guest token
+                # (/auth-status, /login, or by signing one with the default secret),
+                # so ignore it and let the X-API-Key check below decide
+                # (upstream f7819aa3a, GHSA-f4vv-55c2-5789).
                 if not auth_configured and token_info.get("role") == "guest":
+                    if not api_key_configured:
+                        return
+                elif auth_configured and token_info.get("role") != "guest":
                     return
-                # Accept non-guest token if auth is configured
-                if auth_configured and token_info.get("role") != "guest":
-                    return
-
-                # Token validation failed, immediately return 401 error
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Invalid token. Please login again.",
-                )
+                else:
+                    # Token present but not valid for the configured auth mode
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid token. Please login again.",
+                    )
             except HTTPException as e:
                 # If already a 401 error, re-raise it
                 if e.status_code == status.HTTP_401_UNAUTHORIZED:
