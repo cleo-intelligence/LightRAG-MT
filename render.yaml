@@ -86,7 +86,7 @@ services:
       - key: POSTGRES_STATEMENT_CACHE_SIZE
         value: "0"
       - key: POSTGRES_MAX_CONNECTIONS
-        value: "100"
+        sync: false  # Tuned in Render Dashboard: Blueprint syncs keep it
       - key: POSTGRES_MAX_INACTIVE_CONNECTION_LIFETIME
         value: "60"
       - key: POSTGRES_CONNECTION_RETRY_ATTEMPTS
