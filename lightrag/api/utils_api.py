@@ -93,7 +93,9 @@ def get_combined_auth_dependency(api_key: Optional[str] = None):
         else Security(api_key_header),
     ):
         # 1. Check if path is in whitelist
-        path = request.url.path
+        # Use the routed path: request.url is rebuilt from the Host header,
+        # which a client can craft to make any path look whitelisted.
+        path = request.scope["path"]
         for pattern, is_prefix in whitelist_patterns:
             if (is_prefix and path.startswith(pattern)) or (
                 not is_prefix and path == pattern

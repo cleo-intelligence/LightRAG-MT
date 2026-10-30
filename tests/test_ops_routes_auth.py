@@ -25,6 +25,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from starlette.datastructures import URL
+from starlette.requests import Request
 
 # lightrag.api.config parses sys.argv on first use: keep pytest's options out
 with patch.object(sys, "argv", ["lightrag-server"]):
@@ -422,3 +424,29 @@ def test_login_token_works_like_the_key(accounts_client):
 
     assert response.status_code == 200
     assert response.json()["drain_mode"] is False
+
+
+# =============================================================================
+# Whitelist matching: only the routed path counts
+# =============================================================================
+
+
+def test_whitelist_ignores_request_url(client, ops_backend, monkeypatch):
+    """Whatever request.url says, a request to /drain is not a /health one."""
+    monkeypatch.setattr(
+        Request, "url", property(lambda self: URL("http://testserver/health"))
+    )
+
+    response = client.post("/drain", params={"enable": "true"})
+
+    assert response.status_code in (401, 403)
+    assert_endpoint_not_run(ops_backend)
+
+
+@pytest.mark.parametrize("host", ["testserver/health?", "testserver/health#"])
+def test_host_header_cannot_fake_a_public_path(client, ops_backend, host):
+    """Starlette < 1.7 rebuilds request.url from the raw Host header."""
+    response = client.post("/drain", params={"enable": "true"}, headers={"host": host})
+
+    assert response.status_code in (401, 403)
+    assert_endpoint_not_run(ops_backend)
